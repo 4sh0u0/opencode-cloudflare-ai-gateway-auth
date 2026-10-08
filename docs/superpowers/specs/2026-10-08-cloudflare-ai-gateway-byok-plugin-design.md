@@ -175,10 +175,18 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 6. **输出**：键为模型键（`前缀/原生ID`），`api: {id: 模型键, url: 占位地址, npm: 按账号模式与 5.2 选择}`。单个厂商实时列表失败、改用 models.dev 补齐属于正常路径，只写日志，不标记回退。
 7. **最终列表为空**：返回 `provider.models` 的副本并打上 `Symbol.for("magpie.fellBack")`，magpie 保留它原有的列表。
 
+**内存缓存**：magpie 宿主在每个推理请求之前都会调用 `provider.models`（见 11.4），所以 `listModels` 把每个账号的结果缓存在插件进程内存里（不写盘）10 分钟（`LIST_TTL`）：
+
+- 键 = token 的 SHA-256 摘要 + `account` + `gateway` + `mode` + `alias` + `allowUnifiedBilling`；token 原文不进入键、日志或文件；
+- 同一键的并发调用共享同一个进行中的 Promise，只发一轮请求；
+- 失败（含抛出 `signIn: "expired"`）与空列表不缓存，下次调用重新获取；
+- 每个调用方拿到结果的独立副本；`resetModelCache()` 供测试清空缓存。
+
 ### 6.1 models.dev 缓存
 
 - 文件：`<directory>/cloudflare-ai-gateway-auth/models-dev.json`（`directory` 为 magpie 配置目录）。
 - 有效期 6 小时；刷新失败时继续用过期缓存；无缓存且拉取失败时，回退步骤只能返回空（交给第 7 步）。
+- 刷新失败后在内存里记住 10 分钟（`CATALOG_RETRY`）不再请求 models.dev：期间有过期缓存就直接用，没有则照常抛错，不重新拉取。
 
 ## 7. 错误处理
 
@@ -303,6 +311,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 
 ### 11.4 其他发现
 
+- magpie 0.1.1110 的插件宿主在每次插件 fetch 前（`fetchAs()`，为 `chat.headers` 准备模型信息）都调用 `info(provider, key)`，后者每次都调用插件的 `provider.models`，且 `info()` 本身不缓存。不加缓存时，每个推理请求之前都会多一次 CF API `provider_configs` 调用、5 次网关列表调用和一次 `models-dev.json` 读取：增加延迟、在网关日志里多出 5 行、消耗网关限流额度，并占用 CF API 每 5 分钟 1200 次的共享限额。因此第 6 节在内存中缓存列表。
 - 官方文档（统一计费「Credential precedence」与 BYOK「Key aliases」）：REST `/ai/v1/*` 属统一计费端点，只认 `default` 别名的托管 key，`cf-aig-byok-alias` 只对原生入口生效；`default` 下没有 key 时回落统一计费（`cf-aig-no-wholesale` / `byok_only` 可阻止）。与 4.1「`alias` 仅 `mode == native` 时询问」一致，README 需说明。
 - xAI 实时列表含非文本模型 `grok-imagine-*`（含视频生成），其 id 不含第 6 节第 5 步的过滤词；若 models.dev 未标注其输出不含 `text`，会被列出。最终评审已处理：xAI 的 `list.skip` 按 ID 过滤 `grok-imagine-*`（见第 6 节第 5 步）。
 

@@ -4,12 +4,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   CACHE_TTL,
+  CATALOG_RETRY,
   DEFAULT_LIMIT,
+  LIST_TTL,
   buildModel,
   isTextModel,
+  listKey,
   listModels,
   loadCatalog,
   parseList,
+  resetModelCache,
 } from "../models.mjs"
 import { NPM, vendorByPrefix } from "../vendors.mjs"
 import { fakeFetch, json } from "./fetch.mjs"
@@ -60,6 +64,7 @@ const CATALOG = {
 
 let dir
 beforeEach(async () => {
+  resetModelCache()
   dir = await mkdtemp(join(tmpdir(), "cf-aig-"))
 })
 afterEach(async () => {
@@ -220,6 +225,32 @@ describe("loadCatalog", () => {
     const down = fakeFetch([["models.dev", new Response("", { status: 503 })]])
     await expect(loadCatalog({ directory: dir, fetchImpl: down, now: () => 0 })).rejects.toThrow()
   })
+
+  test("after a failure, doesn't ask models.dev again for CATALOG_RETRY", async () => {
+    expect(CATALOG_RETRY).toBe(10 * 60 * 1000)
+    const down = fakeFetch([["models.dev", new Response("", { status: 503 })]])
+    await expect(loadCatalog({ directory: dir, fetchImpl: down, now: () => 0 })).rejects.toThrow("503")
+    await expect(loadCatalog({ directory: dir, fetchImpl: down, now: () => CATALOG_RETRY - 1 })).rejects.toThrow("503")
+    expect(down.calls.length).toBe(1)
+    const up = fakeFetch([["models.dev", json(CATALOG)]])
+    const out = await loadCatalog({ directory: dir, fetchImpl: up, now: () => CATALOG_RETRY })
+    expect(out.xai.models["grok-9"].name).toBe("Grok 9")
+    expect(up.calls.length).toBe(1)
+  })
+
+  test("after a failed refresh, serves the stale cache without asking again for CATALOG_RETRY", async () => {
+    await loadCatalog({ directory: dir, fetchImpl: fakeFetch([["models.dev", json(CATALOG)]]), now: () => 0 })
+    const stale = CACHE_TTL * 2
+    const down = fakeFetch([["models.dev", new Response("", { status: 503 })]])
+    expect((await loadCatalog({ directory: dir, fetchImpl: down, now: () => stale })).xai).toBeDefined()
+    const up = fakeFetch([["models.dev", json({ ...CATALOG, xai: { models: {} } })]])
+    const held = await loadCatalog({ directory: dir, fetchImpl: up, now: () => stale + CATALOG_RETRY - 1 })
+    expect(held.xai.models["grok-9"]).toBeDefined()
+    expect(up.calls.length).toBe(0)
+    const fresh = await loadCatalog({ directory: dir, fetchImpl: up, now: () => stale + CATALOG_RETRY })
+    expect(fresh.xai.models).toEqual({})
+    expect(up.calls.length).toBe(1)
+  })
 })
 
 describe("listModels", () => {
@@ -334,5 +365,91 @@ describe("listModels", () => {
   test("a gateway with no keys lists nothing", async () => {
     const f = fakeFetch([configs([]), ["models.dev", json(CATALOG)]])
     expect(await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).toEqual({})
+  })
+})
+
+// magpie's host asks provider.models before every request it sends (spec
+// 11.4), so the list is kept in memory for LIST_TTL.
+describe("listModels memo", () => {
+  const routes = () =>
+    fakeFetch([
+      [
+        "/provider_configs",
+        json({ success: true, result: [{ provider_slug: "anthropic", alias: "default" }, { provider_slug: "anthropic", alias: "team" }] }),
+      ],
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+      ["models.dev", json(CATALOG)],
+    ])
+  const rounds = (f) => f.calls.filter((c) => c.url.includes("/provider_configs")).length
+
+  test("two calls in a row send one round of requests", async () => {
+    expect(LIST_TTL).toBe(10 * 60 * 1000)
+    const f = routes()
+    const first = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    const sent = f.calls.length
+    const second = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    expect(second).toEqual(first)
+    expect(f.calls.length).toBe(sent)
+    expect(rounds(f)).toBe(1)
+  })
+
+  test("callers don't share the objects they're given", async () => {
+    const f = routes()
+    const first = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    first["anthropic/claude-x"].name = "changed"
+    const second = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    expect(second["anthropic/claude-x"].name).toBe("Claude X (models.dev)")
+  })
+
+  test("concurrent calls share one request in flight", async () => {
+    const f = routes()
+    const [a, b] = await Promise.all([
+      listModels({ account: ACCOUNT, directory: dir, fetchImpl: f }),
+      listModels({ account: ACCOUNT, directory: dir, fetchImpl: f }),
+    ])
+    expect(a).toEqual(b)
+    expect(rounds(f)).toBe(1)
+    expect(f.calls.filter((c) => c.url.includes("/anthropic/v1/models")).length).toBe(1)
+  })
+
+  test("a different token, alias, mode or billing setting lists again", async () => {
+    const f = routes()
+    await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    await listModels({ account: { ...ACCOUNT, token: "tok2" }, directory: dir, fetchImpl: f })
+    await listModels({ account: { ...ACCOUNT, alias: "team" }, directory: dir, fetchImpl: f })
+    await listModels({ account: { ...ACCOUNT, mode: "rest" }, directory: dir, fetchImpl: f })
+    await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, settings: { allowUnifiedBilling: true } })
+    expect(rounds(f)).toBe(5)
+  })
+
+  test("a failure is not kept", async () => {
+    const f = fakeFetch([["/provider_configs", json({ success: false, errors: [{ code: 10000 }] }, 401)]])
+    await expect(listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).rejects.toMatchObject({ signIn: "expired" })
+    await expect(listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).rejects.toMatchObject({ signIn: "expired" })
+    expect(rounds(f)).toBe(2)
+  })
+
+  test("an empty list is not kept", async () => {
+    const f = fakeFetch([["/provider_configs", json({ success: true, result: [] })], ["models.dev", json(CATALOG)]])
+    expect(await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).toEqual({})
+    expect(await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).toEqual({})
+    expect(rounds(f)).toBe(2)
+  })
+
+  test("lists again once LIST_TTL has passed", async () => {
+    const f = routes()
+    await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, now: () => 0 })
+    await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, now: () => LIST_TTL - 1 })
+    expect(rounds(f)).toBe(1)
+    await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, now: () => LIST_TTL })
+    expect(rounds(f)).toBe(2)
+  })
+
+  test("the memo key holds a hash of the token, never the token", () => {
+    const account = { ...ACCOUNT, token: "secret-token-value" }
+    const key = listKey(account, {})
+    expect(key).not.toContain("secret-token-value")
+    expect(key).not.toBe(listKey({ ...account, token: "other-token-value" }, {}))
+    expect(key).toBe(listKey({ ...account }, {}))
   })
 })

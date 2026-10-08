@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { byokSlugs, tokenRefused } from "./cf.mjs"
@@ -7,7 +8,23 @@ import { NPM, PROVIDER, VENDORS, protocolFor } from "./vendors.mjs"
 
 export const MODELS_DEV = "https://models.dev/api.json"
 export const CACHE_TTL = 6 * 60 * 60 * 1000
+// how long a failed models.dev refresh holds off the next one
+export const CATALOG_RETRY = 10 * 60 * 1000
+// how long an account's model list is kept in memory
+export const LIST_TTL = 10 * 60 * 1000
 export const DEFAULT_LIMIT = { context: 128000, output: 16384 }
+
+// Kept in this process only, never on disk: the lists by listKey, each
+// {promise, expires} (expires is 0 while the list is being made), and when
+// models.dev last failed, as {until, message}.
+const lists = new Map()
+let catalogFailure = null
+
+// resetModelCache forgets the kept lists and models.dev's last failure.
+export function resetModelCache() {
+  lists.clear()
+  catalogFailure = null
+}
 
 // Words in the ids of models that don't chat, after magpie's own textModel.
 // A substring heuristic shared by every vendor: it can miss a model, or catch
@@ -60,6 +77,7 @@ export function isTextModel(id, meta, vendor) {
 
 // loadCatalog is the vendors' models.dev catalogs, kept for CACHE_TTL in
 // magpie's config folder; a stale copy serves while models.dev is down.
+// After a failed refresh it doesn't ask models.dev again for CATALOG_RETRY.
 export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now } = {}) {
   const folder = directory ? join(directory, "cloudflare-ai-gateway-auth") : null
   const file = folder ? join(folder, "models-dev.json") : null
@@ -70,6 +88,10 @@ export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now
     } catch {}
   }
   if (cached && now() - cached.fetchedAt < CACHE_TTL) return cached.data
+  if (catalogFailure && now() < catalogFailure.until) {
+    if (cached) return cached.data
+    throw new Error(catalogFailure.message)
+  }
   try {
     const res = await fetchImpl(MODELS_DEV, { signal: AbortSignal.timeout(15000) })
     if (!res.ok) throw new Error(`models.dev answered ${res.status}`)
@@ -81,8 +103,10 @@ export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now
         await writeFile(file, JSON.stringify({ fetchedAt: now(), data }))
       } catch {}
     }
+    catalogFailure = null
     return data
   } catch (e) {
+    catalogFailure = { until: now() + CATALOG_RETRY, message: e.message }
     if (cached) return cached.data
     throw e
   }
@@ -160,11 +184,43 @@ export async function liveList(vendor, account, { fetchImpl = fetch, settings = 
   return parseList(vendor.list.format, await res.json())
 }
 
-// listModels is the account's models: the vendors its gateway holds keys
+// listKey is what an account's list is kept under: everything the list
+// depends on, with the token hashed so the key never holds it.
+export function listKey(account, settings = {}) {
+  const token = createHash("sha256").update(String(account.token)).digest("hex")
+  return JSON.stringify([token, account.account, account.gateway, account.mode, account.alias, settings.allowUnifiedBilling === true])
+}
+
+// listModels is the account's models, kept for LIST_TTL: magpie's host asks
+// for them before every request it sends. Calls that come while a list is
+// being made share it. A failure or an empty list isn't kept, so the next
+// call tries again. Each caller gets its own copy.
+export async function listModels(options) {
+  const { account, settings = {}, now = Date.now } = options
+  const key = listKey(account, settings)
+  const kept = lists.get(key)
+  if (kept && (kept.expires === 0 || now() < kept.expires)) return structuredClone(await kept.promise)
+  for (const [k, e] of lists) if (e.expires && now() >= e.expires) lists.delete(k)
+  const entry = { promise: collectModels({ ...options, settings }), expires: 0 }
+  lists.set(key, entry)
+  const forget = () => lists.get(key) === entry && lists.delete(key)
+  let models
+  try {
+    models = await entry.promise
+  } catch (e) {
+    forget()
+    throw e
+  }
+  if (Object.keys(models).length) entry.expires = now() + LIST_TTL
+  else forget()
+  return structuredClone(models)
+}
+
+// collectModels makes the account's list: the vendors its gateway holds keys
 // for, each listed live or else from models.dev. settings are the plugin's
 // options ({allowUnifiedBilling}); without them lists never fall back to
 // Unified Billing.
-export async function listModels({ account, directory, fetchImpl = fetch, log = () => {}, settings = {} }) {
+async function collectModels({ account, directory, fetchImpl = fetch, log = () => {}, settings = {} }) {
   let slugs = null
   try {
     slugs = await byokSlugs(account, { fetchImpl })

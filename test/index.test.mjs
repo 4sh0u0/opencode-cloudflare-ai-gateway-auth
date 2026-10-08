@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import plugin, { _internal } from "../index.mjs"
+import { resetModelCache } from "../models.mjs"
 import { GATEWAY, PLACEHOLDER } from "../route.mjs"
 import { fakeFetch, json } from "./fetch.mjs"
 
@@ -10,6 +11,9 @@ const ACCT = "0123456789abcdef0123456789abcdef"
 const AUTH = { type: "api", key: "tok", metadata: { account: ACCT, gateway: "my-gateway", mode: "native", alias: "" } }
 const realFetch = globalThis.fetch
 
+beforeEach(() => {
+  resetModelCache()
+})
 afterEach(() => {
   globalThis.fetch = realFetch
 })
