@@ -1,8 +1,23 @@
 import { describe, expect, test } from "bun:test"
 import { annotate, localError, signInOf } from "../errors.mjs"
 
-const gatewayRefusal = JSON.stringify({ success: false, error: [{ code: 2009, message: "Unauthorized" }] })
-const apiRefusal = JSON.stringify({ success: false, errors: [{ code: 10000, message: "Authentication error" }] })
+// Bodies as the live probe (design spec 11.3) saw them.
+const gatewayError = (status, code, message) =>
+  JSON.stringify({
+    success: false,
+    result: [],
+    messages: [],
+    error: [{ code, message }],
+    name: "AiGatewayError",
+    httpCode: status,
+    internalCode: code,
+    message,
+    description: message,
+  })
+const gatewayRefusal = gatewayError(401, 2009, "Unauthorized")
+const noStoredKey = gatewayError(400, 2044, "Customer-provided provider credentials are required for this request")
+const apiError = (code, message) => JSON.stringify({ result: null, success: false, errors: [{ code, message }], messages: [] })
+const apiRefusal = apiError(10000, "Authentication error")
 const anthropicRefusal = JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } })
 const openaiRefusal = JSON.stringify({ error: { message: "Incorrect API key", code: "invalid_api_key" } })
 
@@ -25,8 +40,13 @@ describe("signInOf", () => {
     expect(signInOf(401, "<html>denied</html>", "native")).toBe("kept")
   })
 
+  test("only the code Cloudflare uses for the token expires a REST sign-in", () => {
+    expect(signInOf(401, apiError(9109, "Invalid access token"), "rest")).toBe("kept")
+  })
+
   test("other statuses say nothing", () => {
     for (const status of [200, 400, 429, 500]) expect(signInOf(status, gatewayRefusal, "native")).toBeNull()
+    expect(signInOf(400, noStoredKey, "native")).toBeNull()
   })
 })
 

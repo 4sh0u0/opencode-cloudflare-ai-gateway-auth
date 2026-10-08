@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { CfError, byokSlugs } from "./cf.mjs"
+import { byokSlugs, tokenRefused } from "./cf.mjs"
 import { GATEWAY, PLACEHOLDER } from "./route.mjs"
 import { NPM, PROVIDER, VENDORS, protocolFor } from "./vendors.mjs"
 
@@ -153,7 +153,7 @@ export async function listModels({ account, directory, fetchImpl = fetch, log = 
   try {
     slugs = await byokSlugs(account, { fetchImpl })
   } catch (e) {
-    if (e instanceof CfError && e.status === 401)
+    if (tokenRefused(e))
       throw Object.assign(new Error(`Cloudflare refused the API token (${e.message}); sign in again`), {
         signIn: "expired",
       })

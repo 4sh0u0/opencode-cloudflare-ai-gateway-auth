@@ -117,6 +117,11 @@ describe("REST mode", () => {
     expect(JSON.parse(route(url, init, REST).init.body).model).toBe("xai/grok-9")
   })
 
+  test("Google uses its REST prefix", () => {
+    const [url, init] = request("/chat/completions", { model: "google/gemini-x", messages: [] })
+    expect(JSON.parse(route(url, init, REST).init.body).model).toBe("google/gemini-x")
+  })
+
   test("Gemini's API has no REST endpoint", () => {
     const [url, init] = request("/models/google/gemini-x:generateContent", { contents: [] })
     expect(() => route(url, init, REST)).toThrow(RouteError)

@@ -219,6 +219,26 @@ describe("listModels", () => {
     })
   })
 
+  test("a malformed token expires the sign-in, though Cloudflare answers 400", async () => {
+    const f = fakeFetch([
+      [
+        "/provider_configs",
+        json(
+          {
+            success: false,
+            errors: [{ code: 9106, message: "Authentication failed (status: 400)" }],
+            messages: [],
+            result: null,
+          },
+          400,
+        ),
+      ],
+    ])
+    await expect(listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).rejects.toMatchObject({
+      signIn: "expired",
+    })
+  })
+
   test("without permission to read keys, every vendor is tried", async () => {
     const f = fakeFetch([
       ["/provider_configs", json({ success: false, errors: [{ code: 10000 }] }, 403)],

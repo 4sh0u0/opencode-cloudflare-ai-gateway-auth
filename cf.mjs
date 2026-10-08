@@ -30,6 +30,13 @@ export async function cfGet(path, token, { fetchImpl = fetch, signal } = {}) {
   return body
 }
 
+// tokenRefused is whether the Cloudflare API refused the token itself. The
+// live probe (spec 11.3) saw 401 (code 10000) for an unknown token and 400
+// with code 9106 for a malformed or missing one.
+export function tokenRefused(e) {
+  return e instanceof CfError && (e.status === 401 || e.codes.includes(9106))
+}
+
 const PER_PAGE = 50
 
 // byokSlugs is the provider slugs the gateway holds a key for under the

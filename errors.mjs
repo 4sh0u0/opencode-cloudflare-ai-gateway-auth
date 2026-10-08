@@ -1,7 +1,10 @@
 // Cloudflare's own refusals of the API token, by where the request went
-// (design spec 7.1; codes confirmed by the live probe, V9).
+// (design spec 7.1). The live probe (spec 11.3) saw the gateway answer 401
+// with error[].code 2009 for a malformed or unknown token, and the REST API
+// 401 with errors[].code 10000 for those and for a token without Workers AI
+// Read.
 export const GATEWAY_AUTH_CODES = new Set([2009])
-export const API_AUTH_CODES = new Set([10000, 9109])
+export const API_AUTH_CODES = new Set([10000])
 
 const BODIES = {
   messages: (message) => ({ type: "error", error: { type: "invalid_request_error", message } }),

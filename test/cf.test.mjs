@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { CfError, byokSlugs, cfGet } from "../cf.mjs"
+import { CfError, byokSlugs, cfGet, tokenRefused } from "../cf.mjs"
 import { fakeFetch, json } from "./fetch.mjs"
 
 const ACCOUNT = { account: "0123456789abcdef0123456789abcdef", gateway: "my-gateway", alias: "", token: "tok" }
@@ -61,5 +61,19 @@ describe("byokSlugs", () => {
   test("passes a 401 on as CfError", async () => {
     const f = fakeFetch([["/provider_configs", json({ success: false, errors: [{ code: 10000 }] }, 401)]])
     await expect(byokSlugs(ACCOUNT, { fetchImpl: f })).rejects.toMatchObject({ status: 401 })
+  })
+})
+
+describe("tokenRefused", () => {
+  test("an unknown token (401) and a malformed one (400, 9106) are refusals of the token", () => {
+    expect(tokenRefused(new CfError("x", 401, [10000]))).toBe(true)
+    expect(tokenRefused(new CfError("x", 400, [9106]))).toBe(true)
+  })
+
+  test("anything else is not about the token", () => {
+    expect(tokenRefused(new CfError("x", 403, [10000]))).toBe(false)
+    expect(tokenRefused(new CfError("x", 400, [7003]))).toBe(false)
+    expect(tokenRefused(new CfError("x", 502))).toBe(false)
+    expect(tokenRefused(new Error("network down"))).toBe(false)
   })
 })

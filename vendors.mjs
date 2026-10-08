@@ -43,7 +43,9 @@ export const VENDORS = [
   {
     prefix: "google",
     slug: "google-ai-studio",
-    restPrefix: "google-ai-studio",
+    // from Cloudflare's REST API docs (model naming); the live probe couldn't
+    // reach model routing, its token lacking Workers AI Read (spec 11.2, V3)
+    restPrefix: "google",
     catalog: "google",
     // gemini's path is what comes before /models/<id>:<method>
     native: { protocol: "gemini", paths: { gemini: "/v1beta", chat: "/v1beta/openai/chat/completions" } },
