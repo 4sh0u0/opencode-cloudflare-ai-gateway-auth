@@ -129,7 +129,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 |---|---|---|---|---|---|---|---|
 | OpenAI | `openai` | `openai` | `@ai-sdk/openai`（Responses） | `/responses`、`/chat/completions` | Responses | `/models` | `openai` |
 | Anthropic | `anthropic` | `anthropic` | `@ai-sdk/anthropic`（Messages） | `/v1/messages`、`/v1/chat/completions` | Messages | `/v1/models?limit=1000` | `anthropic` |
-| Google | ❓V3 | `google-ai-studio` | `@ai-sdk/google`（Gemini） | `/v1beta/models/<id>:…`、`/v1beta/openai/chat/completions` | Chat | `/v1beta/models?pageSize=1000` | `google` |
+| Google | ❓V3 | `google-ai-studio` | `@ai-sdk/openai-compatible`（Chat；magpie 把 `@ai-sdk/google` 当 Code Assist，见 11 节 V8） | `/v1beta/openai/chat/completions`、`/v1beta`（Gemini 分支保留） | Chat | `/v1beta/models?pageSize=1000` | `google` |
 | DeepSeek | `deepseek` | `deepseek` | `@ai-sdk/openai-compatible`（Chat） | `/chat/completions` | Chat | `/models` | `deepseek` |
 | xAI | `xai`（❓V3） | `grok` | `@ai-sdk/openai-compatible`（Chat） | `/v1/chat/completions`、`/v1/responses` | Chat | `/v1/models` | `xai` |
 
@@ -284,8 +284,8 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 | V4 | 成立（需要） | 仅有 AI Gateway 权限的 token 调 `/ai/v1/*` 全部 401 / 10000。官方文档同一页「Authentication」：所有 `/accounts/{id}/ai/*` 端点需要 Account › Workers AI › Read，只有 AI Gateway 权限的 token 返回 401 / 10000 | README「Token permissions」：模式 B 另需 Account › Workers AI › Read；缺少时每个推理请求 401 / 10000，与 token 无效无法区分，插件标为 `expired` |
 | V5 | 原生入口成立；REST 未能实测 | 原生入口 → 无托管 key 的 `default` 网关：400，`error[0].code` 2044（"Customer-provided provider credentials are required for this request"）。REST → 401 / 10000（同 V4） | 原生入口无需改动。README 写明模式 B 依赖网关开启 `byok_only`（控制台 Require provider credentials） |
 | V6 | 成立 | `stream: true` + `tools` + `anthropic-beta` → 200，`text/event-stream`，首个事件 `message_start` | 无需在 `route()` 中补头 |
-| V7 | 成立 | `:streamGenerateContent?alt=sse` → 200，`text/event-stream` | Google 原生默认协议保持 Gemini |
-| V8 | 占位 `baseURL` 被接受；带 `/` 的 Gemini 模型 ID 的编码问题**未被触发** | `provider test cloudflare-ai-gateway google/gemini-2.5-flash` 通过，但 magpie 对该模型使用了 `chat` 协议，网关日志显示请求为 `google-ai-studio` 的 `v1beta/openai/chat/completions`（200），没有走 `:generateContent`，因此带 `/` 的 ID 进 Gemini 原生路径的情形未覆盖 | 无需改 `route.mjs`；Gemini 原生路径的 V8 仍待有办法让 magpie 选 Gemini 协议时再验证 |
+| V7 | 成立 | `:streamGenerateContent?alt=sse` → 200，`text/event-stream` | 路径可用，但默认协议因 V8 改为 Chat |
+| V8 | 占位 `baseURL` 被接受。magpie 把 npm 为 `@ai-sdk/google` 的插件模型映射到 Code Assist 协议（`internal/provider/plugins.go` 的 `pluginProtocol`；`internal/gateway/gateway.go` 的 `pathOf` 给出 `/v1internal:streamGenerateContent?alt=sse`，带 Code Assist 信封与包装过的响应流），`route.mjs` 与网关的 google-ai-studio 端点都不支持 | 已安装的 magpie 对 Google 实际走 chat，`google/gemini-2.5-flash` 在网关日志中为 `v1beta/openai/chat/completions`（200）。沙箱复测：改为 chat 后 Google 的 27 个模型 npm 均为 `@ai-sdk/openai-compatible`，`provider test` 通过 | Google 的 `native.protocol` 改为 `chat`（V7 的回退方案）；`paths.gemini` 与 `route.mjs` 的 Gemini 分支保留 |
 | V9 | 原生入口、REST 与预期一致；CF API 对格式错误的 token 返回 400 | 见 11.3 | `GATEWAY_AUTH_CODES = {2009}`；`API_AUTH_CODES = {10000}`（去掉未观察到的 9109）；`errorCodes` 读 `error` / `errors` 数组，与实测形状一致，不改；`listModels` 把 CF API 的 400 / 9106 也视为 token 被拒（`signIn: "expired"`） |
 
 ### 11.3 V9：Cloudflare 拒绝的形状
