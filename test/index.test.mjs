@@ -104,6 +104,24 @@ describe("send", () => {
     expect(f.calls.length).toBe(0)
   })
 
+  test("answers count_tokens locally as an Anthropic error magpie reads as an unsupported endpoint", async () => {
+    const f = fakeFetch([])
+    const res = await _internal.send(
+      `${PLACEHOLDER}/messages/count_tokens`,
+      { method: "POST", body: JSON.stringify({ model: "anthropic/claude-x", messages: [] }) },
+      account,
+      {},
+      f,
+    )
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.type).toBe("error")
+    expect(body.error.type).toBe("invalid_request_error")
+    // the part of magpie 0.1.1110's "not supported" pattern an endpoint message meets
+    expect(body.error.message).toMatch(/^(this |the )?(unsupported|unimplemented) (endpoint|api|method|operation)(:|$)/i)
+    expect(f.calls.length).toBe(0)
+  })
+
   test("routes and marks Cloudflare's refusal", async () => {
     const f = fakeFetch([["/anthropic/v1/messages", json({ success: false, error: [{ code: 2009 }] }, 401)]])
     const res = await _internal.send(

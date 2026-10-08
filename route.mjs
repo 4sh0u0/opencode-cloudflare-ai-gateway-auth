@@ -27,6 +27,12 @@ function text(body) {
   return typeof body === "string" ? body : new TextDecoder().decode(body)
 }
 
+// underProtocol is the API whose path a sub-path such as
+// /messages/count_tokens is under, if any.
+function underProtocol(pathname) {
+  return Object.keys(PROTOCOL_PATHS).find((p) => pathname.startsWith(`${PROTOCOL_PATHS[p]}/`))
+}
+
 // parseRequest reads which API, vendor and model a request magpie built is for.
 export function parseRequest(url, body) {
   const u = new URL(url)
@@ -43,7 +49,10 @@ export function parseRequest(url, body) {
     key = json?.model
   } else {
     const m = GEMINI.exec(u.pathname)
-    if (!m) throw new RouteError(`Unsupported endpoint ${u.pathname}`, "chat")
+    // magpie's check for an unsupported endpoint (as for count_tokens) reads
+    // "Unsupported endpoint: <path>", in the shape of the API the path is
+    // under: /messages/count_tokens answers in Anthropic's
+    if (!m) throw new RouteError(`Unsupported endpoint: ${u.pathname}`, underProtocol(u.pathname) ?? "chat")
     protocol = "gemini"
     method = m[2]
     try {

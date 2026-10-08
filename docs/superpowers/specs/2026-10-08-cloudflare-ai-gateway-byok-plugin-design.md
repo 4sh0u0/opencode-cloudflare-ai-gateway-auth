@@ -204,7 +204,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 
 ### 7.2 本地错误
 
-厂商前缀未知、协议路径不支持等，在本地按请求协议的错误格式返回 400：
+厂商前缀未知、协议路径不支持等，在本地按请求协议的错误格式返回 400。不支持的路径的消息为 `Unsupported endpoint: <路径>`（带冒号，magpie 识别「不支持的端点」的正则要求冒号）；某协议路径下的子路径（如 Claude Code 的 `/messages/count_tokens`）按该协议的格式返回，其余按 chat 格式。count_tokens 不转发到任何上游。
 
 - Anthropic：`{"type":"error","error":{"type":"invalid_request_error","message":…}}`
 - OpenAI（chat / responses）：`{"error":{"message":…,"type":"invalid_request_error"}}`

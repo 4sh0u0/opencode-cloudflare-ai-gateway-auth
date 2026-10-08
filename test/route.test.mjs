@@ -151,9 +151,33 @@ describe("refusals", () => {
     expect(() => route(url, init, NATIVE)).toThrow(RouteError)
   })
 
-  test("an unknown path is refused", () => {
-    const [url, init] = request("/embeddings", { model: "openai/text-embedding-3" })
-    expect(() => route(url, init, NATIVE)).toThrow(RouteError)
+  const refusal = (url, init) => {
+    try {
+      route(url, init, NATIVE)
+    } catch (e) {
+      return e
+    }
+    throw new Error("expected a RouteError")
+  }
+
+  test("an unknown path is refused as an unsupported endpoint, in the chat shape", () => {
+    const e = refusal(...request("/embeddings", { model: "openai/text-embedding-3" }))
+    expect(e).toBeInstanceOf(RouteError)
+    expect(e.message).toBe("Unsupported endpoint: /embeddings")
+    expect(e.protocol).toBe("chat")
+  })
+
+  test("a path under /messages/, such as count_tokens, is refused in the Anthropic shape", () => {
+    const e = refusal(...request("/messages/count_tokens", { model: "anthropic/claude-x", messages: [] }))
+    expect(e).toBeInstanceOf(RouteError)
+    expect(e.message).toBe("Unsupported endpoint: /messages/count_tokens")
+    expect(e.protocol).toBe("messages")
+  })
+
+  test("a path under /responses/ is refused in the Responses shape", () => {
+    const e = refusal(...request("/responses/resp_1/cancel", {}))
+    expect(e.message).toBe("Unsupported endpoint: /responses/resp_1/cancel")
+    expect(e.protocol).toBe("responses")
   })
 
   test("a body that isn't JSON is refused", () => {
