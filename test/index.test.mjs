@@ -71,9 +71,11 @@ describe("PROMPTS", () => {
     expect(_internal.PROMPTS[3].when).toEqual({ key: "mode", op: "eq", value: "native" })
   })
 
-  test("the REST option says what it needs and which vendors it reaches", () => {
+  test("the REST option says what it needs and that it serves only Cloudflare-catalog models", () => {
     const mode = _internal.PROMPTS.find((p) => p.key === "mode")
-    expect(mode.options.find((o) => o.value === "rest").hint).toBe("needs Workers AI Read · OpenAI and Anthropic only")
+    expect(mode.options.find((o) => o.value === "rest").hint).toBe(
+      "needs Workers AI Read · only OpenAI/Anthropic models in Cloudflare's catalog",
+    )
   })
 
   test("validates the account and gateway as they are typed", () => {
