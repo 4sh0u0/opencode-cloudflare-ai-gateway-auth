@@ -220,6 +220,12 @@ describe("buildModel", () => {
     expect(buildModel(google, { id: "gemini-x" }, undefined, "native").api.npm).toBe(NPM.chat)
     expect(buildModel(anthropic, { id: "claude-x" }, undefined, "rest").api.npm).toBe(NPM.messages)
   })
+
+  test("leaves variants out when asked, so the host makes its own", () => {
+    const m = buildModel(anthropic, { id: "claude-x" }, CATALOG.anthropic.models["claude-x"], "native", { variants: false })
+    expect("variants" in m).toBe(false)
+    expect(m.capabilities.reasoning).toBe(true)
+  })
 })
 
 describe("metaFor", () => {
@@ -389,6 +395,21 @@ describe("loadCatalog", () => {
 describe("listModels", () => {
   const configs = (rows) => ["/provider_configs", json({ success: true, result: rows })]
   const row = (provider_slug, alias = "default") => ({ provider_slug, alias })
+
+  test("lists models without variants when asked, natively and over REST", async () => {
+    const f = fakeFetch([
+      configs([row("anthropic")]),
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+      cfPage(),
+      ["models.dev", json(CATALOG)],
+    ])
+    const native = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, variants: false })
+    expect(Object.keys(native)).toEqual(["anthropic/claude-x"])
+    expect("variants" in native["anthropic/claude-x"]).toBe(false)
+    const rest = await listModels({ account: { ...ACCOUNT, mode: "rest" }, directory: dir, fetchImpl: f, variants: false })
+    expect(Object.keys(rest).length).toBeGreaterThan(0)
+    expect(Object.values(rest).some((m) => "variants" in m)).toBe(false)
+  })
 
   test("lists the vendors with keys, live first and models.dev when live fails", async () => {
     const f = fakeFetch([
@@ -710,6 +731,15 @@ describe("listModels memo", () => {
     expect(rounds(f)).toBe(5)
   })
 
+  test("a listing with variants and one without are kept apart", async () => {
+    const f = routes()
+    const full = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    const bare = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, variants: false })
+    expect(Object.keys(full["anthropic/claude-x"].variants)).toEqual(["low", "medium", "high"])
+    expect("variants" in bare["anthropic/claude-x"]).toBe(false)
+    expect(rounds(f)).toBe(2)
+  })
+
   test("a REST and a native listing of the same gateway are kept apart", async () => {
     const f = fakeFetch([
       ["/provider_configs", json({ success: true, result: [{ provider_slug: "anthropic", alias: "default" }] })],
@@ -756,5 +786,7 @@ describe("listModels memo", () => {
     expect(key).not.toContain("secret-token-value")
     expect(key).not.toBe(listKey({ ...account, token: "other-token-value" }, {}))
     expect(key).toBe(listKey({ ...account }, {}))
+    expect(listKey(account, {}, false)).not.toBe(key)
+    expect(listKey(account, {}, true)).toBe(key)
   })
 })

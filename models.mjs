@@ -84,9 +84,9 @@ const KEPT = [...VENDORS.map((v) => v.catalog), AI_GATEWAY]
 const catalogOk = (data) => isObject(data) && KEPT.every((c) => isObject(data[c]?.models))
 
 // loadCatalog is the vendors' models.dev catalogs and AI Gateway's, kept for
-// CACHE_TTL in magpie's config folder; a stale copy serves while models.dev
-// is down. After a failed refresh it doesn't ask models.dev again for
-// CATALOG_RETRY.
+// CACHE_TTL in the host's cache folder (host.mjs); a stale copy serves while
+// models.dev is down. After a failed refresh it doesn't ask models.dev again
+// for CATALOG_RETRY.
 export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now } = {}) {
   return cached("models-dev.json", {
     directory,
@@ -147,9 +147,10 @@ export function restMetaFor(catalog, vendor, id) {
   return metaFor(metas, id) ?? metaFor(metas, dashed)
 }
 
-// buildModel is the OpenCode Model magpie lists for one vendor model: each
-// field from models.dev first, then the vendor's live list, then defaults.
-export function buildModel(vendor, entry, meta, mode) {
+// buildModel is the OpenCode Model listed for one vendor model: each field
+// from models.dev first, then the vendor's live list, then defaults. With
+// variants false it has no variants field, and OpenCode makes its own.
+export function buildModel(vendor, entry, meta, mode, { variants = true } = {}) {
   const key = `${vendor.prefix}/${entry.id}`
   const input = meta?.modalities?.input ?? ["text"]
   const output = meta?.modalities?.output ?? ["text"]
@@ -177,7 +178,7 @@ export function buildModel(vendor, entry, meta, mode) {
       output: meta?.cost?.output ?? 0,
       cache: { read: meta?.cost?.cache_read ?? 0, write: meta?.cost?.cache_write ?? 0 },
     },
-    variants: variantsOf(meta),
+    ...(variants ? { variants: variantsOf(meta) } : {}),
     options: {},
     headers: {},
     status: meta?.status ?? "active",
@@ -211,22 +212,30 @@ export async function liveList(vendor, account, { fetchImpl = fetch, settings = 
 
 // listKey is what an account's list is kept under: everything the list
 // depends on, with the token hashed so the key never holds it.
-export function listKey(account, settings = {}) {
+export function listKey(account, settings = {}, variants = true) {
   const token = createHash("sha256").update(String(account.token)).digest("hex")
-  return JSON.stringify([token, account.account, account.gateway, account.mode, account.alias, settings.allowUnifiedBilling === true])
+  return JSON.stringify([
+    token,
+    account.account,
+    account.gateway,
+    account.mode,
+    account.alias,
+    settings.allowUnifiedBilling === true,
+    variants !== false,
+  ])
 }
 
 // listModels is the account's models, kept for LIST_TTL: magpie's host asks
-// for them before every request it sends. Calls that come while a list is
-// being made share it. A failure or an empty list isn't kept, so the next
-// call tries again. Each caller gets its own copy.
+// for them before every request it sends, OpenCode once per instance. Calls
+// that come while a list is being made share it. A failure or an empty list
+// isn't kept, so the next call tries again. Each caller gets its own copy.
 export async function listModels(options) {
-  const { account, settings = {}, now = Date.now } = options
-  const key = listKey(account, settings)
+  const { account, settings = {}, now = Date.now, variants = true } = options
+  const key = listKey(account, settings, variants)
   const kept = lists.get(key)
   if (kept && (kept.expires === 0 || now() < kept.expires)) return structuredClone(await kept.promise)
   for (const [k, e] of lists) if (e.expires && now() >= e.expires) lists.delete(k)
-  const entry = { promise: collectModels({ ...options, settings }), expires: 0 }
+  const entry = { promise: collectModels({ ...options, settings, variants }), expires: 0 }
   lists.set(key, entry)
   const forget = () => lists.get(key) === entry && lists.delete(key)
   let models
@@ -245,7 +254,7 @@ export async function listModels(options) {
 // Cloudflare's model catalog (spec 11.6), so each vendor's catalog models are
 // its list, and no vendor is asked for its own. models.dev's
 // cloudflare-ai-gateway models stand in while the catalog can't be read.
-async function restModels(vendors, catalogLoad, { directory, fetchImpl, log }) {
+async function restModels(vendors, catalogLoad, { directory, fetchImpl, log, variants }) {
   const [catalog, read] = await Promise.all([
     catalogLoad,
     loadCfCatalog({ directory, fetchImpl }).catch((e) => {
@@ -265,7 +274,7 @@ async function restModels(vendors, catalogLoad, { directory, fetchImpl, log }) {
       if (author !== vendor.restPrefix) continue
       const meta = restMetaFor(catalog, vendor, id)
       if (!isTextModel(id, meta, vendor)) continue
-      const model = buildModel(vendor, { id }, meta, "rest")
+      const model = buildModel(vendor, { id }, meta, "rest", { variants })
       models[model.id] = model
     }
   return models
@@ -276,7 +285,7 @@ async function restModels(vendors, catalogLoad, { directory, fetchImpl, log }) {
 // Cloudflare's catalog (restModels). settings are the plugin's options
 // ({allowUnifiedBilling}); without them lists never fall back to Unified
 // Billing.
-async function collectModels({ account, directory, fetchImpl = fetch, log = () => {}, settings = {} }) {
+async function collectModels({ account, directory, fetchImpl = fetch, log = () => {}, settings = {}, variants = true }) {
   let slugs = null
   try {
     slugs = await byokSlugs(account, { fetchImpl })
@@ -296,7 +305,7 @@ async function collectModels({ account, directory, fetchImpl = fetch, log = () =
     log("warn", `models.dev is unavailable: ${e.message}`)
     return null
   })
-  if (account.mode === "rest") return restModels(vendors, catalogLoad, { directory, fetchImpl, log })
+  if (account.mode === "rest") return restModels(vendors, catalogLoad, { directory, fetchImpl, log, variants })
   const [catalog, ...lives] = await Promise.all([
     catalogLoad,
     ...vendors.map((v) =>
@@ -319,7 +328,7 @@ async function collectModels({ account, directory, fetchImpl = fetch, log = () =
     for (const entry of entries) {
       const meta = metaFor(metas, entry.id)
       if (!isTextModel(entry.id, meta, vendor)) continue
-      const model = buildModel(vendor, entry, meta, account.mode)
+      const model = buildModel(vendor, entry, meta, account.mode, { variants })
       models[model.id] = model
     }
   })
