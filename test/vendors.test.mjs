@@ -17,6 +17,12 @@ describe("VENDORS", () => {
     for (const v of VENDORS) if (v.rest !== null) expect(Object.keys(PROTOCOL_PATHS)).toContain(v.rest)
   })
 
+  test("only OpenAI and Anthropic have a REST route", () => {
+    // REST sends google/ to Vertex AI and deepseek/ to Fireworks, and finds
+    // no key for xai/, so the gateway's stored keys serve none of them
+    expect(VENDORS.filter((v) => v.rest !== null).map((v) => v.prefix)).toEqual(["openai", "anthropic"])
+  })
+
   test("xAI goes through the gateway slug grok, Google through google-ai-studio", () => {
     expect(vendorByPrefix("xai").slug).toBe("grok")
     expect(vendorByPrefix("google").slug).toBe("google-ai-studio")
@@ -61,10 +67,10 @@ describe("splitModel", () => {
 })
 
 describe("protocolFor", () => {
-  test("Google speaks chat completions in both modes", () => {
+  test("Google speaks chat completions natively and has no REST route", () => {
     const google = vendorByPrefix("google")
     expect(protocolFor(google, "native")).toBe("chat")
-    expect(protocolFor(google, "rest")).toBe("chat")
+    expect(protocolFor(google, "rest")).toBeNull()
   })
 
   test("Anthropic speaks Messages in both modes", () => {

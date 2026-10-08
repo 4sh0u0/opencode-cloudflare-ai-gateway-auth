@@ -117,14 +117,28 @@ describe("REST mode", () => {
     expect(h.get("cf-aig-authorization")).toBeNull()
   })
 
-  test("xAI uses its REST prefix", () => {
-    const [url, init] = request("/chat/completions", { model: "xai/grok-9", messages: [] })
-    expect(JSON.parse(route(url, init, REST).init.body).model).toBe("xai/grok-9")
+  test("OpenAI Responses goes to /ai/v1/responses with the prefixed model", () => {
+    const [url, init] = request("/responses", { model: "openai/gpt-x", input: "hi" }, { authorization: "Bearer sk-vendor" })
+    const r = route(url, init, REST)
+    expect(r.url).toBe(`${API}/accounts/${ACCT}/ai/v1/responses`)
+    expect(JSON.parse(r.init.body).model).toBe("openai/gpt-x")
+    expect(r.init.headers.get("authorization")).toBe("Bearer tok")
   })
 
-  test("Google uses its REST prefix", () => {
-    const [url, init] = request("/chat/completions", { model: "google/gemini-x", messages: [] })
-    expect(JSON.parse(route(url, init, REST).init.body).model).toBe("google/gemini-x")
+  test("Google, DeepSeek and xAI are refused in the chat shape, pointing to the native mode", () => {
+    for (const model of ["google/gemini-x", "deepseek/deepseek-x", "xai/grok-9"]) {
+      const [url, init] = request("/chat/completions", { model, messages: [] })
+      const e = (() => {
+        try {
+          route(url, init, REST)
+        } catch (e) {
+          return e
+        }
+      })()
+      expect(e).toBeInstanceOf(RouteError)
+      expect(e.protocol).toBe("chat")
+      expect(e.message).toContain("native mode")
+    }
   })
 
   test("Gemini's API has no REST endpoint", () => {

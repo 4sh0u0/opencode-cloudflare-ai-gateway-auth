@@ -53,15 +53,15 @@ export const VENDORS = [
   {
     prefix: "google",
     slug: "google-ai-studio",
-    // from Cloudflare's REST API docs (model naming); the live probe couldn't
-    // reach model routing, its token lacking Workers AI Read (spec 11.2, V3)
     restPrefix: "google",
     catalog: "google",
     // chat is the default because magpie sends @ai-sdk/google plugin models as
     // Code Assist, which neither route.mjs nor the gateway speaks (spec 11, V8).
     // gemini's path is what comes before /models/<id>:<method>
     native: { protocol: "chat", paths: { gemini: "/v1beta", chat: "/v1beta/openai/chat/completions" } },
-    rest: "chat",
+    // REST takes google/ but serves it through Vertex AI, so the stored
+    // google-ai-studio key never applies (spec 11.6)
+    rest: null,
     list: {
       path: "/v1beta/models?pageSize=1000",
       format: "gemini",
@@ -76,7 +76,9 @@ export const VENDORS = [
     restPrefix: "deepseek",
     catalog: "deepseek",
     native: { protocol: "chat", paths: { chat: "/chat/completions" } },
-    rest: "chat",
+    // REST serves deepseek/ through Fireworks, so the stored deepseek key
+    // never applies (spec 11.6)
+    rest: null,
     list: { path: "/models", format: "openai", headers: {}, skip: null },
   },
   {
@@ -85,7 +87,9 @@ export const VENDORS = [
     restPrefix: "xai",
     catalog: "xai",
     native: { protocol: "chat", paths: { chat: "/v1/chat/completions", responses: "/v1/responses" } },
-    rest: "chat",
+    // REST takes xai/ but finds no stored key for it, though grok holds one
+    // (spec 11.6)
+    rest: null,
     // grok-imagine-* make images and video
     list: { path: "/v1/models", format: "openai", headers: {}, skip: /^grok-imagine/ },
   },

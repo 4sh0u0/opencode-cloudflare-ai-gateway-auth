@@ -206,7 +206,7 @@ describe("buildModel", () => {
 
   test("declares the API by mode", () => {
     expect(buildModel(google, { id: "gemini-x" }, undefined, "native").api.npm).toBe(NPM.chat)
-    expect(buildModel(google, { id: "gemini-x" }, undefined, "rest").api.npm).toBe(NPM.chat)
+    expect(buildModel(anthropic, { id: "claude-x" }, undefined, "rest").api.npm).toBe(NPM.messages)
   })
 })
 
@@ -472,6 +472,21 @@ describe("listModels", () => {
     ])
     const models = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
     expect(Object.keys(models)).toEqual(["xai/grok-9"])
+  })
+
+  test("REST mode lists only the vendors the REST API serves with the gateway's keys", async () => {
+    const f = fakeFetch([
+      configs([row("openai"), row("anthropic"), row("google-ai-studio"), row("deepseek"), row("grok")]),
+      ["/openai/models", json({ data: [{ id: "gpt-x" }] })],
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+      ["/google-ai-studio/", json({ models: [{ name: "models/gemini-x", supportedGenerationMethods: ["generateContent"] }] })],
+      ["/deepseek/models", json({ data: [{ id: "deepseek-x" }] })],
+      ["/grok/v1/models", json({ data: [{ id: "grok-9" }] })],
+      ["models.dev", json(CATALOG)],
+    ])
+    const models = await listModels({ account: { ...ACCOUNT, mode: "rest" }, directory: dir, fetchImpl: f })
+    expect(Object.keys(models).sort()).toEqual(["anthropic/claude-x", "openai/gpt-x"])
+    expect(f.calls.some((c) => /\/(?:google-ai-studio|deepseek|grok)\//.test(c.url))).toBe(false)
   })
 
   test("a gateway with no keys lists nothing", async () => {
