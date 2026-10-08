@@ -1,7 +1,7 @@
 import { PROTOCOL_PATHS, splitModel } from "./vendors.mjs"
 
-// magpie appends each API's path to this base; route() replaces it, so
-// nothing is ever sent to it.
+// The host's AI SDK appends each API's path to this base; route() replaces
+// it, so nothing is ever sent to it.
 export const PLACEHOLDER = "https://cloudflare-ai-gateway.invalid"
 export const GATEWAY = "https://gateway.ai.cloudflare.com/v1"
 export const API = "https://api.cloudflare.com/client/v4"
@@ -18,7 +18,7 @@ export class RouteError extends Error {
 
 const GEMINI = /^\/models\/(.+):(streamGenerateContent|generateContent)$/
 
-// What magpie adds for the saved key. The gateway forwards a request that
+// What the host adds for the saved key. The gateway forwards a request that
 // carries any of these as it is, without using the stored BYOK key.
 const VENDOR_AUTH = ["authorization", "x-api-key", "x-goog-api-key"]
 
@@ -33,7 +33,7 @@ function underProtocol(pathname) {
   return Object.keys(PROTOCOL_PATHS).find((p) => pathname.startsWith(`${PROTOCOL_PATHS[p]}/`))
 }
 
-// parseRequest reads which API, vendor and model a request magpie built is for.
+// parseRequest reads which API, vendor and model a request the host built is for.
 export function parseRequest(url, body) {
   const u = new URL(url)
   let protocol = Object.keys(PROTOCOL_PATHS).find((p) => PROTOCOL_PATHS[p] === u.pathname)
@@ -67,7 +67,7 @@ export function parseRequest(url, body) {
   return { protocol, method, search: u.search, json, vendor: parsed.vendor, nativeId: parsed.nativeId }
 }
 
-// route turns a request magpie built for PLACEHOLDER into the one sent to
+// route turns a request the host built for PLACEHOLDER into the one sent to
 // Cloudflare. account is {token, account, gateway, mode, alias}.
 export function route(url, init, account, options = {}) {
   const req = parseRequest(url, init?.body)

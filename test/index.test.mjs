@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import plugin, { _internal } from "../index.mjs"
@@ -10,6 +10,9 @@ import { fakeFetch, json } from "./fetch.mjs"
 const ACCT = "0123456789abcdef0123456789abcdef"
 const AUTH = { type: "api", key: "tok", metadata: { account: ACCT, gateway: "my-gateway", mode: "native", alias: "" } }
 const realFetch = globalThis.fetch
+
+// magpie hands server() a project named magpie and its config folder
+const MAGPIE = (directory) => ({ project: { id: "magpie" }, directory })
 
 beforeEach(() => {
   resetModelCache()
@@ -168,14 +171,16 @@ describe("send", () => {
 })
 
 describe("server hooks", () => {
-  test("config declares the provider without overwriting the user's", async () => {
+  test("config declares the provider, keeps the user's, and points its baseURL at the placeholder", async () => {
     const hooks = await plugin.server({}, undefined)
     const cfg = {}
     await hooks.config(cfg)
     expect(cfg.provider["cloudflare-ai-gateway"].api).toBe(PLACEHOLDER)
-    const mine = { provider: { "cloudflare-ai-gateway": { name: "mine" } } }
+    expect(cfg.provider["cloudflare-ai-gateway"].options).toEqual({ baseURL: PLACEHOLDER })
+    // e.g. options written for OpenCode's own provider, with a baseURL of the user's
+    const mine = { provider: { "cloudflare-ai-gateway": { name: "mine", options: { baseURL: "https://elsewhere.example", timeout: 5000 } } } }
     await hooks.config(mine)
-    expect(mine.provider["cloudflare-ai-gateway"]).toEqual({ name: "mine" })
+    expect(mine.provider["cloudflare-ai-gateway"]).toEqual({ name: "mine", options: { baseURL: PLACEHOLDER, timeout: 5000 } })
   })
 
   test("the loader sends through Cloudflare with the account's token", async () => {
@@ -213,7 +218,7 @@ describe("server hooks", () => {
     const dir = await mkdtemp(join(tmpdir(), "cf-aig-"))
     try {
       globalThis.fetch = fakeFetch([["/provider_configs", json({ success: true, result: [] })]])
-      const hooks = await plugin.server({ directory: dir }, {})
+      const hooks = await plugin.server(MAGPIE(dir), {})
       const given = { models: { "anthropic/claude-x": { id: "anthropic/claude-x" } } }
       const out = await hooks.provider.models(given, { auth: AUTH })
       expect(Object.keys(out)).toEqual(["anthropic/claude-x"])
@@ -233,7 +238,7 @@ describe("server hooks", () => {
           ["models.dev", json({})],
         ])
         globalThis.fetch = f
-        const hooks = await plugin.server({ directory: dir }, options)
+        const hooks = await plugin.server(MAGPIE(dir), options)
         await hooks.provider.models({ models: {} }, { auth })
         return new Headers(f.calls.find((c) => c.url.includes("/anthropic/v1/models")).init.headers).get("cf-aig-no-wholesale")
       }
@@ -245,8 +250,122 @@ describe("server hooks", () => {
   })
 
   test("models returns the given list without an API sign-in", async () => {
-    const hooks = await plugin.server({}, {})
+    const hooks = await plugin.server(MAGPIE(), {})
     const given = { models: { a: {} } }
     expect(await hooks.provider.models(given, {})).toBe(given.models)
+  })
+
+  test("in magpie, a refused token still asks for a new sign-in", async () => {
+    globalThis.fetch = fakeFetch([["/provider_configs", json({ success: false, errors: [{ code: 10000 }] }, 401)]])
+    const hooks = await plugin.server(MAGPIE(), {})
+    await expect(hooks.provider.models({ models: {} }, { auth: AUTH })).rejects.toMatchObject({ signIn: "expired" })
+  })
+
+  test("in magpie, models keep their reasoning variants", async () => {
+    globalThis.fetch = fakeFetch([
+      ["/provider_configs", json({ success: true, result: [{ provider_slug: "anthropic", alias: "default" }] })],
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+      ["models.dev", json({ anthropic: { models: { "claude-x": { id: "claude-x", name: "Claude X", reasoning: true } } } })],
+    ])
+    const hooks = await plugin.server(MAGPIE(), {})
+    const models = await hooks.provider.models({ models: {} }, { auth: AUTH })
+    expect(Object.keys(models["anthropic/claude-x"].variants)).toEqual(["low", "medium", "high"])
+  })
+})
+
+describe("in OpenCode", () => {
+  let cache
+  let xdg
+  beforeEach(async () => {
+    cache = await mkdtemp(join(tmpdir(), "cf-aig-cache-"))
+    xdg = process.env.XDG_CACHE_HOME
+    process.env.XDG_CACHE_HOME = cache
+  })
+  afterEach(async () => {
+    if (xdg === undefined) delete process.env.XDG_CACHE_HOME
+    else process.env.XDG_CACHE_HOME = xdg
+    await rm(cache, { recursive: true, force: true })
+  })
+
+  // OpenCode hands server() its project, the project's folder, and a client
+  // whose app.log the plugin writes to
+  const opencode = (logs, directory = "/work/project") => ({
+    project: { id: "4b825dc642cb6eb9a060e54bf8d69288fbee4904" },
+    directory,
+    client: {
+      app: {
+        log: async ({ body }) => {
+          logs.push(body)
+        },
+      },
+    },
+  })
+  const keys = (...slugs) => ["/provider_configs", json({ success: true, result: slugs.map((s) => ({ provider_slug: s, alias: "default" })) })]
+  const CATALOG = { anthropic: { models: { "claude-x": { id: "claude-x", name: "Claude X", reasoning: true } } } }
+  const anthropicRoutes = () => [keys("anthropic"), ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })], ["models.dev", json(CATALOG)]]
+
+  test("lists nothing without an API sign-in, whatever the context", async () => {
+    const hooks = await plugin.server(opencode([]), {})
+    const given = { models: { "anthropic/claude-sonnet-4.5": {} } }
+    expect(await hooks.provider.models(given, {})).toEqual({})
+    expect(await hooks.provider.models(given)).toEqual({})
+    expect(await hooks.provider.models(given, null)).toEqual({})
+    expect(await hooks.provider.models(given, { auth: { type: "oauth", refresh: "r", access: "a", expires: 0 } })).toEqual({})
+    expect(await hooks.provider.models(given, { auth: { type: "wellknown", key: "k", token: "t" } })).toEqual({})
+  })
+
+  test("logs a refused token and lists nothing, without throwing or logging the token", async () => {
+    globalThis.fetch = fakeFetch([["/provider_configs", json({ success: false, errors: [{ code: 10000 }] }, 401)]])
+    const logs = []
+    const hooks = await plugin.server(opencode(logs), {})
+    const auth = { ...AUTH, key: "secret-token-value" }
+    expect(await hooks.provider.models({ models: {} }, { auth })).toEqual({})
+    const error = logs.find((l) => l.level === "error")
+    expect(error).toMatchObject({ service: "cloudflare-ai-gateway" })
+    expect(error.message).toStartWith("Couldn't list the models: Cloudflare refused the API token")
+    expect(JSON.stringify(logs)).not.toContain("secret-token-value")
+  })
+
+  test("logs a sign-in it can't read and lists nothing", async () => {
+    const logs = []
+    const hooks = await plugin.server(opencode(logs), {})
+    const auth = { type: "api", key: "tok", metadata: { account: "not-an-account", gateway: "my-gateway", mode: "native" } }
+    expect(await hooks.provider.models({ models: {} }, { auth })).toEqual({})
+    expect(logs.find((l) => l.level === "error").message).toContain("sign in again")
+  })
+
+  test("lists nothing, and says why, when the gateway serves no vendor", async () => {
+    globalThis.fetch = fakeFetch([keys(), ["models.dev", json(CATALOG)]])
+    const logs = []
+    const hooks = await plugin.server(opencode(logs), {})
+    expect(await hooks.provider.models({ models: {} }, { auth: AUTH })).toEqual({})
+    expect(logs.find((l) => l.level === "warn").message).toStartWith("Nothing to list")
+  })
+
+  test("lists models without variants, and caches under XDG_CACHE_HOME rather than the project", async () => {
+    const project = await mkdtemp(join(tmpdir(), "cf-aig-project-"))
+    try {
+      globalThis.fetch = fakeFetch(anthropicRoutes())
+      const hooks = await plugin.server(opencode([], project), {})
+      const models = await hooks.provider.models({ models: {} }, { auth: AUTH })
+      expect(Object.keys(models)).toEqual(["anthropic/claude-x"])
+      expect(models["anthropic/claude-x"].capabilities.reasoning).toBe(true)
+      expect("variants" in models["anthropic/claude-x"]).toBe(false)
+      expect(await readdir(join(cache, "opencode", "cloudflare-ai-gateway-auth"))).toContain("models-dev.json")
+      expect(await readdir(project)).toEqual([])
+    } finally {
+      await rm(project, { recursive: true, force: true })
+    }
+  })
+
+  test("reads a sign-in saved by the TUI's /connect: the answers as typed, without a name", async () => {
+    globalThis.fetch = fakeFetch(anthropicRoutes())
+    const hooks = await plugin.server(opencode([]), {})
+    const typed = { account: ` ${ACCT.toUpperCase()} `, gateway: " my-gateway ", mode: "native", alias: "default" }
+    const auth = { type: "api", key: "tok", metadata: typed }
+    expect(Object.keys(await hooks.provider.models({ models: {} }, { auth }))).toEqual(["anthropic/claude-x"])
+    expect(_internal.accountOf(auth)).toEqual({ token: "tok", account: ACCT, gateway: "my-gateway", mode: "native", alias: "" })
+    // an alias typed before switching to REST stays in the answers
+    expect(_internal.accountOf({ ...auth, metadata: { ...typed, mode: "rest", alias: "team" } }).alias).toBe("")
   })
 })

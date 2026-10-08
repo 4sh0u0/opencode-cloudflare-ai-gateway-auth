@@ -3,7 +3,7 @@
 
 export const PROVIDER = "cloudflare-ai-gateway"
 
-// The AI SDK package that makes magpie speak each API to the plugin.
+// The AI SDK package that makes the host speak each API to the plugin.
 export const NPM = {
   chat: "@ai-sdk/openai-compatible",
   responses: "@ai-sdk/openai",
@@ -11,7 +11,7 @@ export const NPM = {
   gemini: "@ai-sdk/google",
 }
 
-// The path magpie appends to the base URL for each API. Gemini's carries
+// The path the host appends to the base URL for each API. Gemini's carries
 // the model id, so route.mjs matches it on its own.
 export const PROTOCOL_PATHS = {
   chat: "/chat/completions",

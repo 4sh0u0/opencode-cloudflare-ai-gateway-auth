@@ -1,4 +1,5 @@
 import { annotate, localError } from "./errors.mjs"
+import { hostOf } from "./host.mjs"
 import { listModels } from "./models.mjs"
 import { PLACEHOLDER, RouteError, route } from "./route.mjs"
 import { NPM, PROVIDER } from "./vendors.mjs"
@@ -68,8 +69,9 @@ function normalize(inputs = {}) {
   }
 }
 
-// signIn checks the answers. magpie keeps the key the user typed itself
-// (authorize isn't given it), so the token is first tried by the model list.
+// signIn checks the answers. magpie and OpenCode keep the key the user typed
+// themselves (authorize isn't given it), so the token is first tried by the
+// model list.
 function signIn(inputs) {
   const md = normalize(inputs)
   if (!accountOk(md.account)) return { type: "failed", error: ACCOUNT_HINT }
@@ -87,6 +89,8 @@ function labelOf({ gateway, account, alias, mode }) {
 
 const expired = (message) => Object.assign(new Error(message), { signIn: "expired" })
 
+// accountOf reads a saved sign-in: what signIn gave or, from OpenCode's TUI
+// (/connect, which doesn't call authorize), the answers as they were typed.
 function accountOf(auth) {
   if (auth?.type !== "api" || !auth.key) throw expired("Sign in with a Cloudflare API token")
   const md = normalize(auth.metadata)
@@ -107,6 +111,7 @@ async function send(input, init, account, settings, fetchImpl = fetch) {
 }
 
 async function server(input = {}, options = {}) {
+  const host = hostOf(input)
   const settings = { allowUnifiedBilling: options?.allowUnifiedBilling === true }
   const log = (level, message) => {
     try {
@@ -114,9 +119,19 @@ async function server(input = {}, options = {}) {
     } catch {}
   }
   return {
+    // Declares the provider and points its baseURL at PLACEHOLDER, over any
+    // the user set: OpenCode's own cloudflare-ai-gateway loader steps aside
+    // for a provider with a baseURL, and route() reads only requests made
+    // against PLACEHOLDER.
     async config(cfg) {
       cfg.provider ??= {}
-      cfg.provider[PROVIDER] ??= { name: "Cloudflare AI Gateway (BYOK)", npm: NPM.chat, api: PLACEHOLDER, models: {} }
+      const provider = (cfg.provider[PROVIDER] ??= {
+        name: "Cloudflare AI Gateway (BYOK)",
+        npm: NPM.chat,
+        api: PLACEHOLDER,
+        models: {},
+      })
+      provider.options = { ...provider.options, baseURL: PLACEHOLDER }
     },
     auth: {
       provider: PROVIDER,
@@ -144,13 +159,18 @@ async function server(input = {}, options = {}) {
     },
     provider: {
       id: PROVIDER,
-      async models(provider, { auth } = {}) {
-        if (auth?.type !== "api") return provider.models
-        const models = await listModels({ account: accountOf(auth), directory: input?.directory, log, settings })
-        if (Object.keys(models).length) return models
-        const kept = { ...provider.models }
-        kept[Symbol.for("magpie.fellBack")] = true
-        return kept
+      // What is listed signed out, when nothing is listed and when listing
+      // fails differs by host (host.mjs).
+      async models(provider, ctx) {
+        const auth = ctx?.auth
+        if (auth?.type !== "api") return host.signedOut(provider)
+        let models
+        try {
+          models = await listModels({ account: accountOf(auth), directory: host.cacheDir, log, settings, variants: host.variants })
+        } catch (e) {
+          return host.failed(e, log)
+        }
+        return Object.keys(models).length ? models : host.empty(provider, log)
       },
     },
   }
@@ -158,5 +178,5 @@ async function server(input = {}, options = {}) {
 
 export default { id: PROVIDER, server }
 
-// For the tests; magpie calls only the default export's server.
+// For the tests; magpie and OpenCode call only the default export's server.
 export const _internal = { PROMPTS, normalize, signIn, accountOf, send }
