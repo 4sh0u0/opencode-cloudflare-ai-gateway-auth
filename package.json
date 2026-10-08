@@ -4,9 +4,32 @@
   "description": "magpie / OpenCode provider plugin: Cloudflare AI Gateway with your own provider keys (BYOK)",
   "type": "module",
   "main": "./index.mjs",
-  "files": ["index.mjs", "vendors.mjs", "route.mjs", "errors.mjs", "cf.mjs", "models.mjs", "README.md", "LICENSE"],
-  "keywords": ["opencode", "opencode-plugin", "magpie", "cloudflare", "ai-gateway", "byok"],
+  "files": [
+    "index.mjs",
+    "vendors.mjs",
+    "route.mjs",
+    "errors.mjs",
+    "cf.mjs",
+    "models.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "magpie",
+    "cloudflare",
+    "ai-gateway",
+    "byok"
+  ],
   "license": "MIT",
-  "engines": { "bun": ">=1.1.0" },
-  "scripts": { "test": "bun test" }
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "magpie": {
+    "icon": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23F38020' d='M7 19a5 5 0 0 1-.7-9.95A6.5 6.5 0 0 1 18.6 9.1 4.5 4.5 0 0 1 17.5 19z'/></svg>"
+  }
 }
