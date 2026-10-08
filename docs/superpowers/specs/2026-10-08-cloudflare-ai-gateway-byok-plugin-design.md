@@ -285,7 +285,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 | V5 | 原生入口成立；REST 未能实测 | 原生入口 → 无托管 key 的 `default` 网关：400，`error[0].code` 2044（"Customer-provided provider credentials are required for this request"）。REST → 401 / 10000（同 V4） | 原生入口无需改动。README 写明模式 B 依赖网关开启 `byok_only`（控制台 Require provider credentials） |
 | V6 | 成立 | `stream: true` + `tools` + `anthropic-beta` → 200，`text/event-stream`，首个事件 `message_start` | 无需在 `route()` 中补头 |
 | V7 | 成立 | `:streamGenerateContent?alt=sse` → 200，`text/event-stream` | Google 原生默认协议保持 Gemini |
-| V8 | — | magpie 侧，Task 7 验证 | — |
+| V8 | 占位 `baseURL` 被接受；带 `/` 的 Gemini 模型 ID 的编码问题**未被触发** | `provider test cloudflare-ai-gateway google/gemini-2.5-flash` 通过，但 magpie 对该模型使用了 `chat` 协议，网关日志显示请求为 `google-ai-studio` 的 `v1beta/openai/chat/completions`（200），没有走 `:generateContent`，因此带 `/` 的 ID 进 Gemini 原生路径的情形未覆盖 | 无需改 `route.mjs`；Gemini 原生路径的 V8 仍待有办法让 magpie 选 Gemini 协议时再验证 |
 | V9 | 原生入口、REST 与预期一致；CF API 对格式错误的 token 返回 400 | 见 11.3 | `GATEWAY_AUTH_CODES = {2009}`；`API_AUTH_CODES = {10000}`（去掉未观察到的 9109）；`errorCodes` 读 `error` / `errors` 数组，与实测形状一致，不改；`listModels` 把 CF API 的 400 / 9106 也视为 token 被拒（`signIn: "expired"`） |
 
 ### 11.3 V9：Cloudflare 拒绝的形状
@@ -304,3 +304,19 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 
 - 官方文档（统一计费「Credential precedence」与 BYOK「Key aliases」）：REST `/ai/v1/*` 属统一计费端点，只认 `default` 别名的托管 key，`cf-aig-byok-alias` 只对原生入口生效；`default` 下没有 key 时回落统一计费（`cf-aig-no-wholesale` / `byok_only` 可阻止）。与 4.1「`alias` 仅 `mode == native` 时询问」一致，README 需说明。
 - xAI 实时列表含非文本模型 `grok-imagine-*`（含视频生成），其 id 不含第 6 节第 5 步的过滤词；若 models.dev 未标注其输出不含 `text`，会被列出。留给 Task 5 / 最终评审处理。
+
+### 11.5 Task 7：沙箱集成（原生模式）
+
+脚本：`scripts/sandbox.sh native …`（临时 HOME / XDG_*，不触碰真实 `~/.config/magpie`）、`scripts/logs.mjs`。
+
+| 厂商 | 模型 | magpie 协议 | `provider test` | 列表中的模型数 |
+|---|---|---|---|---|
+| Anthropic | `anthropic/claude-haiku-5-5` | anthropic | 通过 | 14 |
+| OpenAI | `openai/chat-latest` | responses | 通过 | 75 |
+| Google | `google/gemini-2.5-flash` | chat | 通过 | 27 |
+| DeepSeek | `deepseek/deepseek-flash` | chat | 通过 | 2 |
+| xAI | `xai/grok-4.20-0309-non-reasoning` | chat | 通过 | 8 |
+
+- 插件列表：`cloudflare-ai-gateway`（共 126 个模型）已登录，无加载错误。
+- 网关日志：最近日志包含各厂商的模型列表请求（200）与推理请求（Anthropic `v1/messages`、OpenAI `responses`、Google `v1beta/openai/chat/completions`，均 `success: true`）。结合 V5 与每个请求都带 `cf-aig-no-wholesale: true`，这些请求只可能使用 BYOK。日志 `cost` 均为 0。`detail` 字段含 `cost`、`tokens_in`、`tokens_out` 等，没有计费方式字段。`logs.mjs` 第一次运行返回一次性的 7000 Internal Error，重试后正常。
+- REST 模式沙箱运行：**待定**。当前 token 缺 Workers AI Read，所有 REST 请求 401（见 V3 / V4），拿到该权限后再跑 `scripts/sandbox.sh rest …`。
