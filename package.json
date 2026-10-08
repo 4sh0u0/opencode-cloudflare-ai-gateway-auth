@@ -1,7 +1,7 @@
 {
   "name": "opencode-cloudflare-ai-gateway-auth",
   "version": "0.1.0",
-  "description": "magpie provider plugin: Cloudflare AI Gateway with your own provider keys (BYOK)",
+  "description": "OpenCode provider plugin: Cloudflare AI Gateway with your own provider keys (BYOK). Also runs in magpie.",
   "type": "module",
   "main": "./index.mjs",
   "files": [
@@ -35,7 +35,8 @@
     "url": "https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/issues"
   },
   "engines": {
-    "bun": ">=1.1.0"
+    "bun": ">=1.1.0",
+    "opencode": ">=1.18.35 <2"
   },
   "scripts": {
     "test": "bun test"
