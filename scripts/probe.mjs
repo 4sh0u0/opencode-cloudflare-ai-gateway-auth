@@ -3,6 +3,7 @@
 // Reads CF_API_TOKEN, CF_ACCOUNT_ID and CF_GATEWAY_ID from .env.local
 // (run with: bun --env-file=.env.local scripts/probe.mjs).
 // Optional: PROBE_MODEL_<VENDOR> picks the model to call per vendor;
+// PROBE_REST_MODEL_<VENDOR> the catalog ids the REST calls use instead;
 // PROBE_V5=1 also runs the no-wholesale checks against the "default" gateway.
 // Writes probe-report.json and never prints the token or whole bodies.
 
@@ -144,42 +145,50 @@ if (picked.google)
 
 // V3 + V4: REST API model prefixes and the token's permissions
 const rest = { authorization: `Bearer ${token}`, "cf-aig-gateway-id": gateway, "cf-aig-no-wholesale": "true" }
-if (picked.openai)
-  await call("V3.rest.responses.openai", `${REST}/ai/v1/responses`, {
-    method: "POST",
-    headers: rest,
-    body: { model: `openai/${picked.openai}`, input: PROMPT, max_output_tokens: 16 },
-  })
-if (picked.anthropic)
-  await call("V3.rest.messages.anthropic", `${REST}/ai/v1/messages`, {
-    method: "POST",
-    headers: { ...rest, ...anthropicVersion },
-    body: { model: `anthropic/${picked.anthropic}`, max_tokens: 1, messages: MESSAGES },
-  })
-if (picked.deepseek)
-  await call("V3.rest.chat.deepseek", `${REST}/ai/v1/chat/completions`, {
-    method: "POST",
-    headers: rest,
-    body: { model: `deepseek/${picked.deepseek}`, max_tokens: 1, messages: MESSAGES },
-  })
+// REST takes only the ids in Cloudflare's model catalog
+// (https://developers.cloudflare.com/ai/models/), which can differ from the
+// vendor's own list (Anthropic's use dots, as in claude-haiku-4.5) and answers
+// any other id 404 "Model not found". PROBE_REST_MODEL_<VENDOR> sets the ids
+// to try after the REST prefix, comma-separated; the default is the picked id.
+function restIds(vendor) {
+  const ids = process.env[`PROBE_REST_MODEL_${vendor.toUpperCase()}`]?.split(",").filter(Boolean)
+  return ids?.length ? ids : picked[vendor] ? [picked[vendor]] : []
+}
+// One key per prefix, as before; with several ids, one key per id.
+async function restCall(name, path, headers, body, ids, id) {
+  const key = ids.length > 1 ? `${name}.${id}` : name
+  await call(key, `${REST}/ai/v1${path}`, { method: "POST", headers, body })
+  report[key].model = body.model
+}
+const openaiIds = restIds("openai")
+for (const id of openaiIds)
+  await restCall("V3.rest.responses.openai", "/responses", rest, { model: `openai/${id}`, input: PROMPT, max_output_tokens: 16 }, openaiIds, id)
+const anthropicIds = restIds("anthropic")
+for (const id of anthropicIds)
+  await restCall(
+    "V3.rest.messages.anthropic",
+    "/messages",
+    { ...rest, ...anthropicVersion },
+    { model: `anthropic/${id}`, max_tokens: 1, messages: MESSAGES },
+    anthropicIds,
+    id,
+  )
+const deepseekIds = restIds("deepseek")
+for (const id of deepseekIds)
+  await restCall("V3.rest.chat.deepseek", "/chat/completions", rest, { model: `deepseek/${id}`, max_tokens: 1, messages: MESSAGES }, deepseekIds, id)
+const googleIds = restIds("google")
 for (const prefix of ["google-ai-studio", "google"])
-  if (picked.google)
-    await call(`V3.rest.chat.${prefix}`, `${REST}/ai/v1/chat/completions`, {
-      method: "POST",
-      headers: rest,
-      body: { model: `${prefix}/${picked.google}`, max_tokens: 1, messages: MESSAGES },
-    })
+  for (const id of googleIds)
+    await restCall(`V3.rest.chat.${prefix}`, "/chat/completions", rest, { model: `${prefix}/${id}`, max_tokens: 1, messages: MESSAGES }, googleIds, id)
+const xaiIds = restIds("xai")
 for (const prefix of ["xai", "grok"])
-  if (picked.xai)
-    await call(`V3.rest.chat.${prefix}`, `${REST}/ai/v1/chat/completions`, {
-      method: "POST",
-      headers: rest,
-      body: { model: `${prefix}/${picked.xai}`, max_tokens: 1, messages: MESSAGES },
-    })
+  for (const id of xaiIds)
+    await restCall(`V3.rest.chat.${prefix}`, "/chat/completions", rest, { model: `${prefix}/${id}`, max_tokens: 1, messages: MESSAGES }, xaiIds, id)
 
 // V5: no-wholesale on a gateway without stored keys. If the header were
 // ignored, each of these two requests would be billed to Unified Billing
-// credits (1 output token), so they only run when PROBE_V5=1.
+// credits (1 output token), so they only run when PROBE_V5=1. The REST one
+// needs a catalog id, or it stops at 404 before billing is decided.
 if (process.env.PROBE_V5 === "1" && picked.openai) {
   await call(
     "V5.native.default-gateway",
@@ -189,8 +198,9 @@ if (process.env.PROBE_V5 === "1" && picked.openai) {
   await call("V5.rest.default-gateway", `${REST}/ai/v1/chat/completions`, {
     method: "POST",
     headers: { ...rest, "cf-aig-gateway-id": "default" },
-    body: { model: `openai/${picked.openai}`, max_tokens: 1, messages: MESSAGES },
+    body: { model: `openai/${openaiIds[0]}`, max_tokens: 1, messages: MESSAGES },
   })
+  report["V5.rest.default-gateway"].model = `openai/${openaiIds[0]}`
 }
 
 // V9: how Cloudflare refuses a bad token on each surface

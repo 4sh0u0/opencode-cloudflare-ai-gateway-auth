@@ -107,7 +107,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 ### 4.3 Token 权限
 
 - 必需：AI Gateway Run（调用）、AI Gateway Read（登录校验、厂商发现）。
-- 模式 B 是否另需 Workers AI Read：见待实测项 V4，结论写入 README。
+- 模式 B 另需 Workers AI Read：V4 已实测证实（见 11.2、11.6），已写入 README。
 
 ### 4.4 插件选项（`plugins.json` 的 `options`）
 
@@ -129,9 +129,9 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 |---|---|---|---|---|---|---|---|
 | OpenAI | `openai` | `openai` | `@ai-sdk/openai`（Responses） | `/responses`、`/chat/completions` | Responses | `/models` | `openai` |
 | Anthropic | `anthropic` | `anthropic` | `@ai-sdk/anthropic`（Messages） | `/v1/messages`、`/v1/chat/completions` | Messages | `/v1/models?limit=1000` | `anthropic` |
-| Google | ❓V3 | `google-ai-studio` | `@ai-sdk/openai-compatible`（Chat；magpie 把 `@ai-sdk/google` 当 Code Assist，见 11 节 V8） | `/v1beta/openai/chat/completions`、`/v1beta`（Gemini 分支保留） | Chat | `/v1beta/models?pageSize=1000` | `google` |
-| DeepSeek | `deepseek` | `deepseek` | `@ai-sdk/openai-compatible`（Chat） | `/chat/completions` | Chat | `/models` | `deepseek` |
-| xAI | `xai`（❓V3） | `grok` | `@ai-sdk/openai-compatible`（Chat） | `/v1/chat/completions`、`/v1/responses` | Chat | `/v1/models` | `xai` |
+| Google | `google` | `google-ai-studio` | `@ai-sdk/openai-compatible`（Chat；magpie 把 `@ai-sdk/google` 当 Code Assist，见 11 节 V8） | `/v1beta/openai/chat/completions`、`/v1beta`（Gemini 分支保留） | 无（`rest: null`，见 11.6） | `/v1beta/models?pageSize=1000` | `google` |
+| DeepSeek | `deepseek` | `deepseek` | `@ai-sdk/openai-compatible`（Chat） | `/chat/completions` | 无（`rest: null`，见 11.6） | `/models` | `deepseek` |
+| xAI | `xai` | `grok` | `@ai-sdk/openai-compatible`（Chat） | `/v1/chat/completions`、`/v1/responses` | 无（`rest: null`，见 11.6） | `/v1/models` | `xai` |
 
 路由按（厂商, 协议路径）查表，不按「每厂商一种协议」硬编码，所以即使模型声明了非默认协议（例如 models.dev 回退数据带来的 npm），只要该厂商支持该协议路径就能正确转发。表中查不到的组合返回 400（见 7.2）。
 
@@ -152,7 +152,8 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 - 请求体：`model` 保持 `前缀/原生ID`（V3 若证实 REST 前缀与内部前缀不同，在映射表加 `restPrefix` 字段做转换）。
 - 删除请求头：`x-api-key`、`x-goog-api-key`；`authorization` 覆盖为 `Bearer <token>`。
 - 设置请求头：`cf-aig-gateway-id: <gateway>`；`cf-aig-no-wholesale` 规则同模式 A。
-- 模式 B 下 `models()` 给每个模型声明的协议见 5.2「模式 B 协议」列。
+- 模式 B 下 `models()` 给每个模型声明的协议见 5.2「模式 B 协议」列；该列为「无」的厂商在模式 B 下不列出，请求在本地返回 400（7.2）。
+- REST 只接受 Cloudflare 模型目录（https://developers.cloudflare.com/ai/models/）里的模型 ID，它与厂商原生 ID 不一定相同；目录外的 ID 失败（见 11.6）。
 
 ## 6. 模型列表（`provider.models`）
 
@@ -290,9 +291,9 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 |---|---|---|---|
 | V1 | 成立（各厂商默认协议） | OpenAI `/responses`、Anthropic `/v1/messages`、Google `:generateContent`、DeepSeek `/chat/completions`、xAI `/v1/chat/completions` 均 200。请求不带厂商认证头且带 `cf-aig-no-wholesale: true`，无托管 key 时会 400（见 V5），所以 200 即使用了托管 key | `VENDORS.native` 不变。非默认原生路径（OpenAI / Anthropic / Google 的 chat，xAI 的 responses）未实测 |
 | V2 | 成立 | 5 家 `…models` 均 200，可解析模型数：OpenAI 139、Anthropic 14、Google（含 `generateContent`）45、DeepSeek 2、xAI 14 | `list` 不变 |
-| V3 | 未能实测 | 7 个 REST 请求（含 Google 的 `google-ai-studio/`、`google/` 与 xAI 的 `xai/`、`grok/` 两组前缀）全部 401，`errors[0].code` 10000：token 缺 Workers AI 权限（V4），请求在模型路由前即被拒 | 按官方 REST 文档「Model naming」（https://developers.cloudflare.com/ai-gateway/usage/rest-api/#model-naming）：Google 前缀 `google`、xAI 前缀 `xai`。Google 的 `restPrefix` 由 `google-ai-studio` 改为 `google`，xAI 保持 `xai`。**待用带 Workers AI Read 的 token 重跑 V3 确认**（包括 REST 的 `google/` 是否使用 `google-ai-studio` 托管 key） |
-| V4 | 成立（需要） | 仅有 AI Gateway 权限的 token 调 `/ai/v1/*` 全部 401 / 10000。官方文档同一页「Authentication」：所有 `/accounts/{id}/ai/*` 端点需要 Account › Workers AI › Read，只有 AI Gateway 权限的 token 返回 401 / 10000 | README「Token permissions」：模式 B 另需 Account › Workers AI › Read；缺少时每个推理请求 401 / 10000，与 token 无效无法区分，插件标为 `expired` |
-| V5 | 原生入口成立；REST 未能实测 | 原生入口 → 无托管 key 的 `default` 网关：400，`error[0].code` 2044（"Customer-provided provider credentials are required for this request"）。REST → 401 / 10000（同 V4） | 原生入口无需改动。README 写明模式 B 依赖网关开启 `byok_only`（控制台 Require provider credentials） |
+| V3 | 首测未能实测；复测（11.6）：`openai`、`anthropic` 成立，Google、DeepSeek、xAI 没有可用的前缀 | 首测：7 个 REST 请求（含 Google 的 `google-ai-studio/`、`google/` 与 xAI 的 `xai/`、`grok/` 两组前缀）全部 401，`errors[0].code` 10000：token 缺 Workers AI 权限（V4），请求在模型路由前即被拒 | 首测：按官方 REST 文档「Model naming」（https://developers.cloudflare.com/ai-gateway/usage/rest-api/#model-naming），Google 的 `restPrefix` 由 `google-ai-studio` 改为 `google`，xAI 保持 `xai`。复测后：两者路由正确，但 REST 用不上网关托管的 key，Google、DeepSeek、xAI 的 `rest` 改为 `null`（见 11.6） |
+| V4 | 成立（需要）；复测证实 | 仅有 AI Gateway 权限的 token 调 `/ai/v1/*` 全部 401 / 10000。官方文档同一页「Authentication」：所有 `/accounts/{id}/ai/*` 端点需要 Account › Workers AI › Read，只有 AI Gateway 权限的 token 返回 401 / 10000。复测（11.6）：加上 Workers AI Read 后不再出现 401 / 10000 | README「Token permissions」：模式 B 另需 Account › Workers AI › Read；缺少时每个推理请求 401 / 10000，与 token 无效无法区分，插件标为 `expired` |
+| V5 | 原生入口成立；REST 拒绝但不是 400（11.6） | 原生入口 → 无托管 key 的 `default` 网关：400，`error[0].code` 2044（"Customer-provided provider credentials are required for this request"）。REST 首测 → 401 / 10000（同 V4）；复测 → `default` 网关 402 / 7007，`byok_only` 网关 403 / 2049，均未计费 | 原生入口无需改动。README 写明 REST 的拒绝形状，并要求模式 B 开启网关 `byok_only`（控制台 Require provider credentials） |
 | V6 | 成立 | `stream: true` + `tools` + `anthropic-beta` → 200，`text/event-stream`，首个事件 `message_start` | 无需在 `route()` 中补头 |
 | V7 | 成立 | `:streamGenerateContent?alt=sse` → 200，`text/event-stream` | 路径可用，但默认协议因 V8 改为 Chat |
 | V8 | 占位 `baseURL` 被接受。magpie 把 npm 为 `@ai-sdk/google` 的插件模型映射到 Code Assist 协议（`internal/provider/plugins.go` 的 `pluginProtocol`；`internal/gateway/gateway.go` 的 `pathOf` 给出 `/v1internal:streamGenerateContent?alt=sse`，带 Code Assist 信封与包装过的响应流），`route.mjs` 与网关的 google-ai-studio 端点都不支持 | 已安装的 magpie 对 Google 实际走 chat，`google/gemini-2.5-flash` 在网关日志中为 `v1beta/openai/chat/completions`（200）。沙箱复测：改为 chat 后 Google 的 27 个模型 npm 均为 `@ai-sdk/openai-compatible`，`provider test` 通过 | Google 的 `native.protocol` 改为 `chat`（V7 的回退方案）；`paths.gemini` 与 `route.mjs` 的 Gemini 分支保留 |
@@ -330,4 +331,59 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 
 - 插件列表：`cloudflare-ai-gateway`（共 126 个模型）已登录，无加载错误。
 - 网关日志：最近日志包含各厂商的模型列表请求（200）与推理请求（Anthropic `v1/messages`、OpenAI `responses`、Google `v1beta/openai/chat/completions`，均 `success: true`）。结合 V5 与每个请求都带 `cf-aig-no-wholesale: true`，这些请求只可能使用 BYOK。日志 `cost` 均为 0。`detail` 字段含 `cost`、`tokens_in`、`tokens_out` 等，没有计费方式字段。`logs.mjs` 第一次运行返回一次性的 7000 Internal Error，重试后正常。
-- REST 模式沙箱运行：**待定**。当前 token 缺 Workers AI Read，所有 REST 请求 401（见 V3 / V4），拿到该权限后再跑 `scripts/sandbox.sh rest …`。
+- REST 模式沙箱运行：首测时 token 缺 Workers AI Read，所有 REST 请求 401（见 V3 / V4），未运行；加上该权限后的运行见下表。
+
+REST 模式（2026-10-08 复测，Google、DeepSeek、xAI 已为 `rest: null`）：`scripts/sandbox.sh rest …`，模型为 11.6 运行 2 的 `picked`（xAI 用覆盖值），另加两个与目录 ID 一致的模型。
+
+| 厂商 | 模型 | magpie 协议 | `provider test` | 列表中的模型数 |
+|---|---|---|---|---|
+| OpenAI | `openai/gpt-5.1-chat-latest`（`picked`，不在目录中） | responses | 失败：500 "Model execution failed"，网关日志 provider `unknown` | 59 |
+| OpenAI | `openai/gpt-4.1-nano`（目录 ID；不在插件列表中，magpie 照样测试） | responses | 通过；网关日志 `byok: default`、`wholesale: false` | — |
+| Anthropic | `anthropic/claude-haiku-5-5`（`picked`，不在目录中） | anthropic | 失败：500 "An internal error occurred"，网关日志 provider `unknown` | 14 |
+| Anthropic | `anthropic/claude-sonnet-5`（ID 与目录一致） | anthropic | 通过；网关日志 `byok: default`、`wholesale: false` | — |
+| Google | `google/gemini-2.5-flash` | responses（模型未列出） | 失败：插件本地 400 "The REST API can't serve this responses request; sign in with the native mode"，未发出 | 0 |
+| DeepSeek | `deepseek/deepseek-flash` | responses（模型未列出） | 同上 | 0 |
+| xAI | `xai/grok-4.20-0309-non-reasoning` | responses（模型未列出） | 同上 | 0 |
+
+- 插件列表：`cloudflare-ai-gateway`（共 73 个模型）已登录，账号名以 ` · REST` 结尾。
+- 两个 500 与探测脚本的 404 "Model not found" 是同一原因：ID 不在目录中（网关日志 provider `unknown`、tokens 0、cost 0）。状态码不同，推测与 magpie 的请求形状（如流式）有关，未深究。
+
+### 11.6 REST 复测（2026-10-08）
+
+#### 条件
+
+- Token 加上了 Account › Workers AI › Read（仍有 AI Gateway Run + Read）。
+- 只读查询 CF API 得到：插件网关开启认证且 `byok_only: true`（Require provider credentials）；`default` 网关 `byok_only: false`，没有托管 key（V5 原生入口 400 / 2044 也说明这一点）。
+- 运行 1：`PROBE_V5=1 PROBE_MODEL_XAI=grok-4.20-0309-non-reasoning bun --env-file=.env.local scripts/probe.mjs`。REST 不再 401 / 10000，但 `openai/chat-latest`、`anthropic/claude-haiku-5-5`、`deepseek/deepseek-flash` 都是 404 "Model not found"。官方 REST 文档：REST 只接受 Cloudflare 模型目录（https://developers.cloudflare.com/ai/models/）里的 ID，而脚本用的是厂商实时列表里的 ID。V5 REST 也停在 404，没有走到计费判断。
+- 脚本修正：新增 `PROBE_REST_MODEL_<VENDOR>`（逗号分隔，缺省为 `picked`），REST 调用改用目录 ID，每个 REST 记录带 `model` 字段；V5 REST 改用 OpenAI 的 REST ID。
+- 运行 2：在运行 1 的命令上加 `PROBE_REST_MODEL_OPENAI=gpt-4.1-nano PROBE_REST_MODEL_ANTHROPIC=claude-haiku-4.5,claude-haiku-4-5 PROBE_REST_MODEL_DEEPSEEK=deepseek-v4-pro`。Google、xAI 的 `picked` 本身就是目录 ID。下表以运行 2 为准，两次运行中 Google、xAI 各请求的结果相同。
+- 网关日志（`/logs`，只读）给出每个 REST 请求实际路由到的 provider，以及 `byok`、`wholesale` 字段。
+
+#### V3：前缀与托管 key
+
+| 厂商 | 端点 | 模型 | 状态 / 错误码 | 网关日志 | 结论 |
+|---|---|---|---|---|---|
+| OpenAI | `/ai/v1/responses` | `openai/gpt-4.1-nano` | 200 | provider `openai`，`byok: default`，`wholesale: false` | 前缀 `openai` 成立，用的是托管 key |
+| Anthropic | `/ai/v1/messages` | `anthropic/claude-haiku-4.5` | 200 | provider `anthropic`，`byok: default`，`wholesale: false` | 前缀 `anthropic` 成立，用的是托管 key |
+| Anthropic | `/ai/v1/messages` | `anthropic/claude-haiku-4-5`（原生 ID 写法） | 404，`error.type` `not_found_error`，"Model not found" | provider `unknown` | REST 不接受 Anthropic 原生 ID 的写法 |
+| DeepSeek | `/ai/v1/chat/completions` | `deepseek/deepseek-v4-pro` | 403，`errors[0].code` 2049 | provider `fireworks` | REST 经 Fireworks 提供 DeepSeek，托管的 `deepseek` key 用不上 |
+| Google | `/ai/v1/chat/completions` | `google/gemini-2.5-flash` | 403 / 2049 | provider `google-vertex-ai` | 前缀 `google` 可路由，但 REST 经 Vertex AI 提供，托管的 `google-ai-studio` key 用不上 |
+| Google | `/ai/v1/chat/completions` | `google-ai-studio/gemini-2.5-flash` | 404 / 7003 "Model not found" | provider `unknown` | 不是 REST 前缀 |
+| xAI | `/ai/v1/chat/completions` | `xai/grok-4.20-0309-non-reasoning` | 403 / 2049 | provider `xai` | 前缀 `xai` 可路由，但找不到可用的托管 key（key 存在 slug `grok` 下）；原因未确认 |
+| xAI | `/ai/v1/chat/completions` | `grok/grok-4.20-0309-non-reasoning` | 404 / 7003 | provider `unknown` | 不是 REST 前缀 |
+
+2049 的消息为 "This request requires customer-provided provider credentials, but no applicable provider key was found."。表中 403 / 404 请求的网关日志均为 tokens 0、cost 0、`wholesale: false`。REST 请求都出现在插件网关的日志里（路径记为 `/run`），说明 `cf-aig-gateway-id` 生效。
+
+#### 结论
+
+| 编号 | 结论 | 状态码 / 证据 | 采用的处理 |
+|---|---|---|---|
+| V3 | OpenAI、Anthropic 成立；Google、DeepSeek、xAI 没有返回 200 的前缀 | 见上表 | `restPrefix` 不变。Google、DeepSeek、xAI 的 `rest` 改为 `null`：模式 B 下不列出，请求在本地返回 400，提示改用原生模式（`route.mjs`、`models.mjs` 已支持） |
+| V4 | 成立（需要） | 加上 Workers AI Read 后，REST 请求不再 401 / 10000 | README 不变 |
+| V5（REST） | 拒绝，但不是 400 | `default` 网关（`byok_only: false`，只靠 `cf-aig-no-wholesale: true`），`openai/gpt-4.1-nano`：402，`errors[0].code` 7007（"This request is not eligible for unified billing and has no provider credentials"），该请求不在 `default` 网关的日志里，未计费。插件网关（`byok_only: true`）：403 / 2049。402 是该头造成的，还是账号没有可用的统一计费额度造成的，这次无法区分（要区分，得发一个不带该头、可能被计费的请求） | README「Billing safety」写明 REST 的拒绝形状，模式 B 仍要求开启 Require provider credentials |
+| V9 | 与 11.3 一致 | 原生 401 / 2009、REST 401 / 10000、CF API 400 / 9106 | 无 |
+
+#### 其他发现
+
+- REST 的模型 ID 是 Cloudflare 模型目录的 ID，不一定等于厂商原生 ID。目录只是子集（如 OpenAI 的 `chat-latest`、`gpt-5.1-chat-latest` 不在其中）；Anthropic 带小版本号的模型在目录里用点（`claude-sonnet-5.5`，原生为 `claude-sonnet-5-5`）。插件在模式 B 下仍按第 6 节从厂商实时列表取模型、发送 `<restPrefix>/<原生ID>`。对照 2026-10-08 的目录页面，模式 B 列出的 OpenAI 59 个模型中有 22 个、Anthropic 14 个中有 3 个（`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`）的 ID 与目录一致；Anthropic 另有 7 个只差「`-数字-数字` → `-数字.数字`」。其余模型在模式 B 下请求失败：探测脚本的请求为 404 "Model not found"，经 magpie 为 500（11.5）。**待决定**：模式 B 是否按目录过滤列表、转换 ID，或另作处理。
+- 原生入口复测：运行 1 各项与 11.2 相同（V1、V2、V6、V7 均 200）。运行 2 中脚本为 OpenAI 选中了 `gpt-5.1-chat-latest`（列表顺序变化），`V1.openai.responses` 30 秒超时；其余原生项为 200。该项与 REST 无关，未深究。
