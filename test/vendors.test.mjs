@@ -51,9 +51,9 @@ describe("splitModel", () => {
 })
 
 describe("protocolFor", () => {
-  test("Google speaks Gemini natively and chat completions over REST", () => {
+  test("Google speaks chat completions in both modes", () => {
     const google = vendorByPrefix("google")
-    expect(protocolFor(google, "native")).toBe("gemini")
+    expect(protocolFor(google, "native")).toBe("chat")
     expect(protocolFor(google, "rest")).toBe("chat")
   })
 

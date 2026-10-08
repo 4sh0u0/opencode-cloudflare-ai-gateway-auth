@@ -46,6 +46,11 @@ describe("native mode", () => {
     expect(route(u2, i2, NATIVE).url).toBe(`${GW}/openai/chat/completions`)
   })
 
+  test("a native chat request for a Google model goes to the OpenAI-compatible endpoint", () => {
+    const [url, init] = request("/chat/completions", { model: "google/gemini-x", messages: [] })
+    expect(route(url, init, NATIVE).url).toBe(`${GW}/google-ai-studio/v1beta/openai/chat/completions`)
+  })
+
   test("Gemini streaming keeps its query and body", () => {
     const body = { contents: [{ role: "user", parts: [{ text: "hi" }] }] }
     const [url, init] = request("/models/google/gemini-x:streamGenerateContent?alt=sse", body, {

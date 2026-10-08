@@ -153,7 +153,7 @@ describe("buildModel", () => {
   })
 
   test("declares the API by mode", () => {
-    expect(buildModel(google, { id: "gemini-x" }, undefined, "native").api.npm).toBe(NPM.gemini)
+    expect(buildModel(google, { id: "gemini-x" }, undefined, "native").api.npm).toBe(NPM.chat)
     expect(buildModel(google, { id: "gemini-x" }, undefined, "rest").api.npm).toBe(NPM.chat)
   })
 })
