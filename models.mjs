@@ -75,6 +75,12 @@ export function isTextModel(id, meta, vendor) {
   return !NOT_TEXT.some((word) => lower.includes(word))
 }
 
+const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
+
+// catalogOk is whether data has the shape loadCatalog keeps: every vendor's
+// catalog with an object of models.
+const catalogOk = (data) => isObject(data) && VENDORS.every((v) => isObject(data[v.catalog]?.models))
+
 // loadCatalog is the vendors' models.dev catalogs, kept for CACHE_TTL in
 // magpie's config folder; a stale copy serves while models.dev is down.
 // After a failed refresh it doesn't ask models.dev again for CATALOG_RETRY.
@@ -86,6 +92,8 @@ export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now
     try {
       cached = JSON.parse(await readFile(file, "utf8"))
     } catch {}
+    // a corrupt or foreign file is as good as none
+    if (!catalogOk(cached?.data)) cached = null
   }
   if (cached && now() - cached.fetchedAt < CACHE_TTL) return cached.data
   if (catalogFailure && now() < catalogFailure.until) {
@@ -96,7 +104,12 @@ export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now
     const res = await fetchImpl(MODELS_DEV, { signal: AbortSignal.timeout(15000) })
     if (!res.ok) throw new Error(`models.dev answered ${res.status}`)
     const all = await res.json()
-    const data = Object.fromEntries(VENDORS.map((v) => [v.catalog, { models: all?.[v.catalog]?.models ?? {} }]))
+    const data = Object.fromEntries(
+      VENDORS.map((v) => {
+        const models = all?.[v.catalog]?.models
+        return [v.catalog, { models: isObject(models) ? models : {} }]
+      }),
+    )
     if (file) {
       try {
         await mkdir(folder, { recursive: true })
@@ -266,7 +279,8 @@ async function collectModels({ account, directory, fetchImpl = fetch, log = () =
   const models = {}
   vendors.forEach((vendor, i) => {
     const metas = catalog?.[vendor.catalog]?.models ?? {}
-    const entries = lives[i] ?? Object.values(metas).map((m) => ({ id: m.id, name: m.name }))
+    // models.dev's ids are its keys; an entry's own id field may be missing
+    const entries = lives[i] ?? Object.entries(metas).map(([id, m]) => ({ id, name: m?.name }))
     for (const entry of entries) {
       const meta = metaFor(metas, entry.id)
       if (!isTextModel(entry.id, meta, vendor)) continue

@@ -165,7 +165,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
    - OpenAI / DeepSeek / xAI：`{data: [{id}]}`
    - Anthropic：`{data: [{id, display_name}]}`
    - Google：`{models: [{name: "models/<id>", displayName, inputTokenLimit, outputTokenLimit, supportedGenerationMethods}]}`，只保留含 `generateContent` 的
-3. **回退**：某厂商实时列表失败（含 V2 不成立的情况，不含第 2 步的 2044）→ 用 models.dev 中该厂商原生目录的全部模型。
+3. **回退**：某厂商实时列表失败（含 V2 不成立的情况，不含第 2 步的 2044）→ 用 models.dev 中该厂商原生目录的全部模型（模型 ID 取目录的键，不取条目里的 `id` 字段）。
 4. **元数据合并**：按原生 ID 匹配 models.dev 原生目录，补 `name`、`limit`、`reasoning`/`variants`、`tool_call`、`temperature`、`modalities`、`cost`。精确 ID 没有条目时，去掉末尾的日期后缀（`-YYYY-MM-DD` 或 `-YYYYMMDD`）再查一次，日期快照借用基础模型的元数据，但不借用名称（避免与基础模型同名）。每个字段的取值优先级：models.dev → 实时列表自带的信息（Anthropic 的 `display_name`、Google 的 `displayName` 与 token 上限）→ 默认值（上下文 128000、输出 16384、支持工具调用、不推理、不支持 `temperature`：与 magpie 自身的 `temperature ?? false` 一致，推理模型会拒绝 temperature）。
 5. **过滤**：
    - 去掉 `status: "deprecated"`；
@@ -185,6 +185,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 ### 6.1 models.dev 缓存
 
 - 文件：`<directory>/cloudflare-ai-gateway-auth/models-dev.json`（`directory` 为 magpie 配置目录）。
+- 文件内容须为 `{fetchedAt, data}`，且 `data` 中 5 家厂商的 `models` 都是对象；损坏或形状不对的文件视同没有缓存。
 - 有效期 6 小时；刷新失败时继续用过期缓存；无缓存且拉取失败时，回退步骤只能返回空（交给第 7 步）。
 - 刷新失败后在内存里记住 10 分钟（`CATALOG_RETRY`）不再请求 models.dev：期间有过期缓存就直接用，没有则照常抛错，不重新拉取。
 

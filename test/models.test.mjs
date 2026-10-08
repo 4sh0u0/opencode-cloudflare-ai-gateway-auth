@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -263,6 +263,40 @@ describe("loadCatalog", () => {
     await expect(loadCatalog({ directory: dir, fetchImpl: down, now: () => 0 })).rejects.toThrow()
   })
 
+  test("ignores a corrupt or misshapen cache file and asks models.dev", async () => {
+    const file = join(dir, "cloudflare-ai-gateway-auth", "models-dev.json")
+    await mkdir(join(dir, "cloudflare-ai-gateway-auth"), { recursive: true })
+    const corrupt = [
+      "not json",
+      JSON.stringify(null),
+      JSON.stringify({ fetchedAt: 0, data: "oops" }),
+      JSON.stringify({ fetchedAt: 0, data: null }),
+      JSON.stringify({ fetchedAt: 0, data: [] }),
+      JSON.stringify({ fetchedAt: 0, data: { ...CATALOG, openai: { models: "x" } } }),
+    ]
+    for (const text of corrupt) {
+      resetModelCache()
+      await writeFile(file, text)
+      const f = fakeFetch([["models.dev", json(CATALOG)]])
+      const out = await loadCatalog({ directory: dir, fetchImpl: f, now: () => 1 })
+      expect([text, f.calls.length]).toEqual([text, 1])
+      expect(out.xai.models["grok-9"].name).toBe("Grok 9")
+    }
+  })
+
+  test("doesn't serve a corrupt cache file while models.dev is down", async () => {
+    await mkdir(join(dir, "cloudflare-ai-gateway-auth"), { recursive: true })
+    await writeFile(join(dir, "cloudflare-ai-gateway-auth", "models-dev.json"), JSON.stringify({ fetchedAt: 0, data: "oops" }))
+    const down = fakeFetch([["models.dev", new Response("", { status: 503 })]])
+    await expect(loadCatalog({ directory: dir, fetchImpl: down, now: () => CACHE_TTL * 2 })).rejects.toThrow("503")
+  })
+
+  test("keeps a vendor's catalog only when its models are an object", async () => {
+    const f = fakeFetch([["models.dev", json({ ...CATALOG, openai: { models: ["gpt-x"] } })]])
+    const out = await loadCatalog({ directory: dir, fetchImpl: f, now: () => 0 })
+    expect(out.openai.models).toEqual({})
+  })
+
   test("after a failure, doesn't ask models.dev again for CATALOG_RETRY", async () => {
     expect(CATALOG_RETRY).toBe(10 * 60 * 1000)
     const down = fakeFetch([["models.dev", new Response("", { status: 503 })]])
@@ -387,6 +421,14 @@ describe("listModels", () => {
     expect(models["xai/grok-9"]).toBeUndefined()
     expect(models["google/gemini-x"]).toBeDefined()
     expect(logs.some((m) => m.includes("xai"))).toBe(true)
+  })
+
+  test("models.dev fallback entries take their ids from the catalog's keys", async () => {
+    const catalog = { ...CATALOG, xai: { models: { "grok-9": { name: "Grok 9" }, "grok-10": { id: "other", name: "Grok 10" } } } }
+    const f = fakeFetch([configs([row("grok")]), ["/grok/v1/models", new Response("", { status: 500 })], ["models.dev", json(catalog)]])
+    const models = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    expect(Object.keys(models).sort()).toEqual(["xai/grok-10", "xai/grok-9"])
+    expect(models["xai/grok-10"].name).toBe("Grok 10")
   })
 
   test("a dated snapshot takes its base model's models.dev metadata", async () => {
