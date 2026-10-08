@@ -81,6 +81,12 @@ describe("native mode", () => {
     expect(JSON.parse(route(url, init, NATIVE).init.body).model).toBe("ft:gpt-5/acme")
   })
 
+  test("a Messages system prompt in text blocks goes to Anthropic as it is", () => {
+    const system = [{ type: "text", text: "You are terse.", cache_control: { type: "ephemeral" } }]
+    const [url, init] = request("/messages", { model: "anthropic/claude-x", system, messages: [] })
+    expect(JSON.parse(route(url, init, NATIVE).init.body).system).toEqual(system)
+  })
+
   test("a byte body is read like a string one", () => {
     const [url, init] = request("/messages")
     init.body = new TextEncoder().encode(JSON.stringify({ model: "anthropic/claude-x" }))
@@ -130,6 +136,51 @@ describe("REST mode", () => {
     const r = route(url, init, REST)
     expect(r.url).toBe(`${API}/accounts/${ACCT}/ai/v1/messages`)
     expect(JSON.parse(r.init.body)).toEqual({ model: "anthropic/claude-sonnet-5.5", max_tokens: 8 })
+  })
+
+  // Cloudflare's REST /ai/v1/messages takes system only as a string; the AI
+  // SDK sends a list of text blocks (spec §8)
+  test("a Messages system prompt in text blocks goes out as one string", () => {
+    const messages = [{ role: "user", content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }] }]
+    const [url, init] = request("/messages", {
+      model: "anthropic/claude-x",
+      max_tokens: 8,
+      system: [
+        { type: "text", text: "You are terse.", cache_control: { type: "ephemeral" } },
+        { type: "text", text: "Answer in English." },
+      ],
+      messages,
+    })
+    expect(JSON.parse(route(url, init, REST).init.body)).toEqual({
+      model: "anthropic/claude-x",
+      max_tokens: 8,
+      system: "You are terse.\n\nAnswer in English.",
+      messages,
+    })
+  })
+
+  test("a string system prompt, or none, goes out as it is", () => {
+    const [u1, i1] = request("/messages", { model: "anthropic/claude-x", system: "Be brief.", messages: [] })
+    expect(JSON.parse(route(u1, i1, REST).init.body).system).toBe("Be brief.")
+    const [u2, i2] = request("/messages", { model: "anthropic/claude-x", messages: [] })
+    expect("system" in JSON.parse(route(u2, i2, REST).init.body)).toBe(false)
+  })
+
+  test("an empty list of system blocks is left out", () => {
+    const [url, init] = request("/messages", { model: "anthropic/claude-x", system: [], messages: [] })
+    expect("system" in JSON.parse(route(url, init, REST).init.body)).toBe(false)
+  })
+
+  test("a system list with anything but text blocks is left for Cloudflare to answer", () => {
+    const system = [{ type: "text", text: "A" }, { type: "image", source: {} }]
+    const [url, init] = request("/messages", { model: "anthropic/claude-x", system, messages: [] })
+    expect(JSON.parse(route(url, init, REST).init.body).system).toEqual(system)
+  })
+
+  test("only the Messages API's system is joined", () => {
+    const body = { model: "openai/gpt-x", input: "hi", system: [{ type: "text", text: "A" }] }
+    const [url, init] = request("/responses", body)
+    expect(JSON.parse(route(url, init, REST).init.body).system).toEqual(body.system)
   })
 
   test("Google, DeepSeek and xAI are refused in the chat shape, pointing to the native mode", () => {

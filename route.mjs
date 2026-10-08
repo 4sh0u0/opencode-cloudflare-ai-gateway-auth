@@ -67,6 +67,15 @@ export function parseRequest(url, body) {
   return { protocol, method, search: u.search, json, vendor: parsed.vendor, nativeId: parsed.nativeId }
 }
 
+// restSystem is a Messages system prompt as Cloudflare's REST API takes it: a
+// string. The AI SDK sends a list of text blocks, which REST refuses (spec
+// §8), so their texts are joined and their cache_control is dropped. An empty
+// list is left out; anything else is left for Cloudflare to answer.
+function restSystem(system) {
+  if (!Array.isArray(system) || !system.every((b) => b?.type === "text" && typeof b.text === "string")) return system
+  return system.length ? system.map((b) => b.text).join("\n\n") : undefined
+}
+
 // route turns a request the host built for PLACEHOLDER into the one sent to
 // Cloudflare. account is {token, account, gateway, mode, alias}.
 export function route(url, init, account, options = {}) {
@@ -85,7 +94,9 @@ export function route(url, init, account, options = {}) {
     if (!path || vendor.rest === null)
       throw new RouteError(`The REST API can't serve this ${protocol} request; sign in with the native mode`, protocol)
     target = `${API}/accounts/${account.account}/ai/v1${path}${req.search}`
-    body = JSON.stringify({ ...req.json, model: `${vendor.restPrefix}/${nativeId}` })
+    const json = { ...req.json, model: `${vendor.restPrefix}/${nativeId}` }
+    if (protocol === "messages" && "system" in json) json.system = restSystem(json.system)
+    body = JSON.stringify(json)
     headers.delete("x-api-key")
     headers.delete("x-goog-api-key")
     headers.set("authorization", `Bearer ${account.token}`)
