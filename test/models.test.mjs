@@ -607,6 +607,16 @@ describe("listModels", () => {
       }
     })
 
+    test("a page whose text generation models are all other authors' fails like a page that is down", async () => {
+      const catalog = { ...CATALOG, "cloudflare-ai-gateway": { models: { "openai/gpt-5.5": { name: "GPT-5.5" } } } }
+      const logs = []
+      const page = cfEntry("google", "gemini-x") + cfEntry("meta", "llama-x")
+      const f = fakeFetch([everyKey(), cfPage(page), ["models.dev", json(catalog)]])
+      const models = await listModels({ account: REST, directory: dir, fetchImpl: f, log: (level, message) => logs.push([level, message]) })
+      expect(Object.keys(models)).toEqual(["openai/gpt-5.5"])
+      expect(logs.some(([level, message]) => level === "warn" && message.includes("cloudflare-ai-gateway"))).toBe(true)
+    })
+
     test("doesn't warn of a fallback while the catalog page answers", async () => {
       const logs = []
       const f = fakeFetch([everyKey(), cfPage(), ["models.dev", json(CATALOG)]])

@@ -1,4 +1,5 @@
 import { cached } from "./cache.mjs"
+import { VENDORS } from "./vendors.mjs"
 
 // Cloudflare's model catalog: the only model ids the REST API takes (spec
 // 11.6). Its page, as Markdown, is the source; nothing machine-readable
@@ -35,8 +36,9 @@ const entriesOk = (data) =>
 
 // loadCfCatalog is the catalog's Text Generation models, kept for CACHE_TTL
 // next to models.dev's catalog, with the same stale copy and CATALOG_RETRY
-// hold-off (cache.mjs). A page without them, as after a change of format,
-// fails like a page that is down.
+// hold-off (cache.mjs). A page without them, or without any by a
+// REST-capable vendor, as after a change of format, fails like a page that is
+// down.
 export async function loadCfCatalog({ directory, fetchImpl = fetch, now = Date.now } = {}) {
   return cached("cf-catalog.json", {
     directory,
@@ -47,6 +49,11 @@ export async function loadCfCatalog({ directory, fetchImpl = fetch, now = Date.n
       if (!res.ok) throw new Error(`Cloudflare's model catalog answered ${res.status}`)
       const entries = parseCfCatalog(await res.text())
       if (!entries.length) throw new Error("Cloudflare's model catalog lists no text generation models")
+      // REST mode lists only what a REST-capable vendor authors; a page
+      // without any of it would leave the list empty, so it fails instead
+      const authors = new Set(VENDORS.filter((v) => v.rest).map((v) => v.restPrefix))
+      if (!entries.some((e) => authors.has(e.author)))
+        throw new Error("Cloudflare's model catalog lists no text generation models of OpenAI or Anthropic")
       return entries
     },
   })
