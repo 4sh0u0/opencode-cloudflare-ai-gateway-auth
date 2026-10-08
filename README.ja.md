@@ -15,10 +15,10 @@
 ## インストール
 
 ```sh
-magpie plugin add github:4sh0u0/opencode-cloudflare-ai-gateway-auth
+magpie plugin add opencode-cloudflare-ai-gateway-auth
 ```
 
-アプリでは **Plugins → Discover → Unofficial**（日本語 UI では「プラグイン → 発見 → 非公式 · GitHub」）からも見つけられます。ローカルのコピーも使えます。`magpie plugin add /path/to/folder` を実行するか、**Plugins → Add a plugin**（日本語 UI では「プラグイン → プラグインを追加」）でフォルダーを指定してください。
+アプリでは **Plugins → Discover → Unofficial**（日本語 UI では「プラグイン → 発見 → 非公式 · GitHub」）からも見つけられます。GitHub から直接インストールする場合は `magpie plugin add github:4sh0u0/opencode-cloudflare-ai-gateway-auth` を実行してください。ローカルのコピーも使えます。`magpie plugin add /path/to/folder` を実行するか、**Plugins → Add a plugin**（日本語 UI では「プラグイン → プラグインを追加」）でフォルダーを指定してください。
 
 ## サインイン
 

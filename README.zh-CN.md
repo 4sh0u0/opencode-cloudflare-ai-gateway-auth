@@ -15,10 +15,10 @@
 ## 安装
 
 ```sh
-magpie plugin add github:4sh0u0/opencode-cloudflare-ai-gateway-auth
+magpie plugin add opencode-cloudflare-ai-gateway-auth
 ```
 
-也可以在 app 的 **Plugins → Discover → Unofficial**（中文界面：插件 → 发现 → 非官方插件 · GitHub）中找到它。本地副本同样可用：`magpie plugin add /path/to/folder`，或在 **Plugins → Add a plugin**（中文界面：插件 → 添加插件）中填入该文件夹。
+也可以在 app 的 **Plugins → Discover → Unofficial**（中文界面：插件 → 发现 → 非官方插件 · GitHub）中找到它。若要直接从 GitHub 安装：`magpie plugin add github:4sh0u0/opencode-cloudflare-ai-gateway-auth`。本地副本同样可用：`magpie plugin add /path/to/folder`，或在 **Plugins → Add a plugin**（中文界面：插件 → 添加插件）中填入该文件夹。
 
 ## 登录
 

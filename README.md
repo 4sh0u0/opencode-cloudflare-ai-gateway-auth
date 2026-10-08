@@ -21,11 +21,13 @@ Billing. It also lists the models your gateway can reach.
 ## Install
 
 ```sh
-magpie plugin add github:4sh0u0/opencode-cloudflare-ai-gateway-auth
+magpie plugin add opencode-cloudflare-ai-gateway-auth
 ```
 
-or, in the app, find it under **Plugins → Discover → Unofficial**. A local copy works
-too: `magpie plugin add /path/to/folder`, or **Plugins → Add a plugin** with the folder.
+or, in the app, find it under **Plugins → Discover → Unofficial**. To install straight
+from GitHub instead: `magpie plugin add github:4sh0u0/opencode-cloudflare-ai-gateway-auth`.
+A local copy works too: `magpie plugin add /path/to/folder`, or **Plugins → Add a plugin**
+with the folder.
 
 ## Sign in
 
