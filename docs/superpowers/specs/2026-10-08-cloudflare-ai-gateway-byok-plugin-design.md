@@ -58,7 +58,9 @@
 | `index.mjs` | 唯一导出插件函数，组装 `config` / `auth` / `provider` 钩子；测试辅助挂在 `export const _internal` | 其余模块 |
 | `vendors.mjs` | 厂商映射表（纯数据 + 查询函数） | 无 |
 | `route.mjs` | `route(input, init, account, options)` → `{url, init}`，纯函数，负责 URL、请求头、请求体改写 | `vendors.mjs` |
-| `models.mjs` | 厂商发现、实时列表、models.dev 回退、元数据合并、过滤 | `vendors.mjs`、`cf.mjs`、`errors.mjs`（读错误码）、`route.mjs`（只取常量） |
+| `models.mjs` | 厂商发现、实时列表、models.dev 回退、元数据合并、过滤；模式 B 按 Cloudflare 模型目录列模型（6.2） | `vendors.mjs`、`cf.mjs`、`cfcatalog.mjs`、`cache.mjs`、`errors.mjs`（读错误码）、`route.mjs`（只取常量） |
+| `cfcatalog.mjs` | 读取 Cloudflare 模型目录页面（Markdown），解析其中的 Text Generation 模型，缓存为 `cf-catalog.json`（6.2） | `cache.mjs` |
+| `cache.mjs` | 磁盘缓存：6 小时有效期、刷新失败用过期副本、失败后 10 分钟不重试、形状校验；models.dev 与 Cloudflare 目录共用 | 无 |
 | `cf.mjs` | Cloudflare API 小客户端：读 `provider_configs`，统一错误分类 | `route.mjs`（只取 API 常量） |
 | `errors.mjs` | 上游错误 → `X-Magpie-Sign-In` 判定；按协议格式构造本地错误响应 | 无 |
 | `test/*.test.mjs` | `bun test` 单元测试，fetch 全部模拟 | 被测模块 |
@@ -66,6 +68,7 @@
 ### 3.2 模型命名
 
 - 插件内部模型键 = `<统一前缀>/<原生ID>`，例如 `anthropic/claude-sonnet-5-5`（Anthropic 原生 ID 用连字符）、`openai/gpt-5.5`、`xai/grok-4.3`。
+- 模式 B 例外：模型键的 ID 部分是 Cloudflare 模型目录的 ID，例如 `anthropic/claude-sonnet-5.5`（目录里带小版本号的 Anthropic 模型用点），见 6.2。
 - agent 中写作 `cloudflare-ai-gateway/<模型键>`。
 - 模型的 API id（`api.id`）等于模型键，所以 `fetch` 收到的请求体 `model` 永远带厂商前缀，路由据此判断厂商。
 
@@ -149,20 +152,20 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 ### 5.4 模式 B（REST API）改写规则
 
 - URL：`https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1{协议路径}`；协议路径只允许 `/messages`、`/responses`、`/chat/completions`。
-- 请求体：`model` 保持 `前缀/原生ID`（V3 若证实 REST 前缀与内部前缀不同，在映射表加 `restPrefix` 字段做转换）。
+- 请求体：`model` 改为 `<restPrefix>/<模型键中的 ID>`（`openai`、`anthropic` 的 `restPrefix` 与前缀相同）。模式 B 列出的就是目录 ID（6.2），所以原样发送，请求时不做 ID 转换。
 - 删除请求头：`x-api-key`、`x-goog-api-key`；`authorization` 覆盖为 `Bearer <token>`。
 - 设置请求头：`cf-aig-gateway-id: <gateway>`；`cf-aig-no-wholesale` 规则同模式 A。
 - 模式 B 下 `models()` 给每个模型声明的协议见 5.2「模式 B 协议」列；该列为「无」的厂商在模式 B 下不列出，请求在本地返回 400（7.2）。
-- REST 只接受 Cloudflare 模型目录（https://developers.cloudflare.com/ai/models/）里的模型 ID，它与厂商原生 ID 不一定相同；目录外的 ID 失败（见 11.6）。
+- REST 只接受 Cloudflare 模型目录（https://developers.cloudflare.com/ai/models/）里的模型 ID，它与厂商原生 ID 不一定相同；目录外的 ID 失败（见 11.6）。因此模式 B 只列目录里的模型（6.2）。
 
 ## 6. 模型列表（`provider.models`）
 
-对每个账号：
+对每个账号（模式 A 依次走第 1～7 步；模式 B 走第 1、5、6、7 步，第 2～4 步换成 6.2，不请求厂商实时列表）：
 
 1. **厂商发现**：`GET /accounts/{account}/ai-gateway/gateways/{gateway}/provider_configs`（分页 `page`/`per_page`），取 `alias` 与账号别名（空即 `default`）匹配的条目的 `provider_slug`，与映射表的 5 家取交集。
    - 401：token 无效 → 抛出带 `signIn: "expired"` 的错误；
    - 403（缺少 AI Gateway Read）或其他失败：日志提示，按 5 家全部处理。
-2. **实时列表**（各厂商并行，每个 8 秒超时；无论账号是模式 A 还是 B，列表都经原生入口获取，因为 REST API 没有列表端点）：`GET {gw}/{slug}{实时列表路径}`，头同 5.3（无请求体）：`cf-aig-authorization`、非默认别名的 `cf-aig-byok-alias`，以及 `allowUnifiedBilling` 不为 `true` 时的 `cf-aig-no-wholesale: true`（`listModels` 从 `index.mjs` 接收插件选项，缺省即带该头）。返回 400 且错误码（与 `errors.mjs` 同一解析）含 2044（该别名下没有这家厂商的托管 key，见 11.3）时，整家厂商不列出，也不走第 3 步的 models.dev 回退。成功时解析：
+2. **实时列表**（仅模式 A；各厂商并行，每个 8 秒超时，经原生入口获取。模式 B 不请求实时列表：REST API 没有列表端点，且只接受目录 ID，见 6.2）：`GET {gw}/{slug}{实时列表路径}`，头同 5.3（无请求体）：`cf-aig-authorization`、非默认别名的 `cf-aig-byok-alias`，以及 `allowUnifiedBilling` 不为 `true` 时的 `cf-aig-no-wholesale: true`（`listModels` 从 `index.mjs` 接收插件选项，缺省即带该头）。返回 400 且错误码（与 `errors.mjs` 同一解析）含 2044（该别名下没有这家厂商的托管 key，见 11.3）时，整家厂商不列出，也不走第 3 步的 models.dev 回退。成功时解析：
    - OpenAI / DeepSeek / xAI：`{data: [{id}]}`
    - Anthropic：`{data: [{id, display_name}]}`
    - Google：`{models: [{name: "models/<id>", displayName, inputTokenLimit, outputTokenLimit, supportedGenerationMethods}]}`，只保留含 `generateContent` 的
@@ -173,12 +176,12 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
    - ID 含 `embed`、`-tts`、`image`、`audio`、`-live`、`realtime`、`moderation`、`whisper`、`dall-e`、`sora`、`transcribe`、`computer-use`、`deep-research` 的（参照 magpie `textModel`；这是各厂商共用的子串启发式，可能漏判或误判）；
    - 命中该厂商 `list.skip` 正则的 ID（`vendors.mjs`，只作用于本厂商，不依赖 models.dev）：OpenAI 只支持旧 Completions 的 `davinci-002`、`babbage-002`、`gpt-3.5-turbo-instruct*` 与只支持 Chat Completions 的 `*-search-preview*`、`*-search-api*`（走 Responses 会 400）；Google 的 Lyria（音乐）与 nano-banana（图像）；xAI 的 `grok-imagine-*`（图像 / 视频）；
    - models.dev 标明输出不含 `text` 的。
-6. **输出**：键为模型键（`前缀/原生ID`），`api: {id: 模型键, url: 占位地址, npm: 按账号模式与 5.2 选择}`。单个厂商实时列表失败、改用 models.dev 补齐属于正常路径，只写日志，不标记回退。
+6. **输出**：键为模型键（`前缀/原生ID`；模式 B 为 `前缀/目录 ID`，见 6.2），`api: {id: 模型键, url: 占位地址, npm: 按账号模式与 5.2 选择}`。单个厂商实时列表失败、改用 models.dev 补齐属于正常路径，只写日志，不标记回退。
 7. **最终列表为空**：返回 `provider.models` 的副本并打上 `Symbol.for("magpie.fellBack")`，magpie 保留它原有的列表。
 
 **内存缓存**：magpie 宿主在每个推理请求之前都会调用 `provider.models`（见 11.4），所以 `listModels` 把每个账号的结果缓存在插件进程内存里（不写盘）10 分钟（`LIST_TTL`）：
 
-- 键 = token 的 SHA-256 摘要 + `account` + `gateway` + `mode` + `alias` + `allowUnifiedBilling`；token 原文不进入键、日志或文件；
+- 键 = token 的 SHA-256 摘要 + `account` + `gateway` + `mode` + `alias` + `allowUnifiedBilling`；token 原文不进入键、日志或文件；同一网关的模式 A 与模式 B 列表分开缓存；
 - 同一键的并发调用共享同一个进行中的 Promise，只发一轮请求；
 - 失败（含抛出 `signIn: "expired"`）与空列表不缓存，下次调用重新获取；
 - 每个调用方拿到结果的独立副本；`resetModelCache()` 供测试清空缓存。
@@ -186,9 +189,40 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 ### 6.1 models.dev 缓存
 
 - 文件：`<directory>/cloudflare-ai-gateway-auth/models-dev.json`（`directory` 为 magpie 配置目录）。
-- 文件内容须为 `{fetchedAt, data}`，且 `data` 中 5 家厂商的 `models` 都是对象；损坏或形状不对的文件视同没有缓存。
+- 只保留 5 家厂商的原生目录与 `cloudflare-ai-gateway`（6.2 的回退与元数据来源）。
+- 文件内容须为 `{fetchedAt, data}`，且 `data` 中这 6 个目录的 `models` 都是对象；损坏或形状不对的文件视同没有缓存（旧版本写的、缺 `cloudflare-ai-gateway` 的文件也一样，会重新拉取）。
 - 有效期 6 小时；刷新失败时继续用过期缓存；无缓存且拉取失败时，回退步骤只能返回空（交给第 7 步）。
 - 刷新失败后在内存里记住 10 分钟（`CATALOG_RETRY`）不再请求 models.dev：期间有过期缓存就直接用，没有则照常抛错，不重新拉取。
+- 以上规则由 `cache.mjs` 实现，6.2 的 `cf-catalog.json` 共用；两者的失败记录按文件分开，互不影响。`resetModelCache()` 同时清空两者的失败记录。
+
+### 6.2 模式 B（REST API）的模型列表
+
+REST 只接受 Cloudflare 模型目录里的 ID，且只有 OpenAI、Anthropic 用得上网关托管的 key（11.6）。所以模式 B 直接列目录里这两家的模型，不请求厂商实时列表（用户已批准，2026-10-08）。
+
+- **来源**：`https://developers.cloudflare.com/ai/models/index.md`，即目录页面的 Markdown 版。目录没有机器可读的接口（1.1）。
+- **解析**（`cfcatalog.mjs` 的 `parseCfCatalog`）：
+  - 每个条目形如 `[![<Logo>](…)<h3><ID></h3>`，空行后接 `<作者><任务> <描述>](https://developers.cloudflare.com/ai/models/<author>/<ID>/)`。其他任务（`Text-to-Speech`、`Text-to-Image`、`Automatic Speech Recognition` 等）也是同样的形状。
+  - 按 `[![` 切分。作者与 ID 取自链接路径 `/ai/models/<author>/<ID>/`；只有链接之前的文本（空白归一后）含 `Text Generation` 的条目才保留。带点的 ID 原样保留。
+  - Workers AI 模型的链接是 `/ai/models/@cf/<author>/<ID>/`，作者以 `@` 开头，不匹配，不列出（1.4）。
+  - 2026-10-08 的页面有 172 个 `/<author>/<ID>/` 链接，其中 64 个是 Text Generation（OpenAI 25 个，Anthropic 13 个）。
+- **缓存**：
+  - 文件为 `<directory>/cloudflare-ai-gateway-auth/cf-catalog.json`，内容 `{fetchedAt, data: [{author, id}]}`。
+  - 规则同 6.1：有效期 6 小时；刷新失败时用过期副本；失败后 10 分钟不重试。形状不对的文件视同没有，包括非数组、空数组、条目缺 `author` 或 `id` 字符串。
+  - 解析为 0 条（例如页面改版）按刷新失败处理。
+- **回退**：
+  - 页面取不到或解析为 0 条，且没有可用缓存时，写 warn 日志，改用 models.dev `cloudflare-ai-gateway` 的模型键。键形如 `anthropic/claude-sonnet-5.5`，在第一个 `/` 处切成作者与 ID。
+  - 两者都不可用时，列表为空，走第 7 步。
+- **模型键**：
+  - 对映射表中 `rest` 不为 `null`、且网关有 `default` 别名托管 key（第 1 步）的厂商（目前是 `openai`、`anthropic`），取作者等于其 `restPrefix` 的目录条目。
+  - 模型键为 `<prefix>/<目录 ID>`，例如 `anthropic/claude-sonnet-5.5`。`api.npm` 按 5.2 的模式 B 协议：OpenAI 为 Responses，Anthropic 为 Messages。
+  - 第 5 步的过滤（`isTextModel`、厂商的 `list.skip`）照常适用。
+  - 路由（5.4）原样发送 `<restPrefix>/<目录 ID>`，请求时不做转换。
+- **元数据**（`restMetaFor`）：依次查找，取第一个命中的条目；条目里缺的字段用第 4 步的默认值。
+  1. models.dev `cloudflare-ai-gateway` 的 `models["<restPrefix>/<ID>"]`；
+  2. 厂商原生目录中的同一 ID；
+  3. 原生目录中把 `.` 换成 `-` 的 ID（`claude-sonnet-5.5` → `claude-sonnet-5-5`）；
+  4. 第 4 步的日期后缀回退，先用原 ID，再用换成 `-` 的 ID。
+- 模式 A 完全不变：实时列表、models.dev 回退等照旧。
 
 ## 7. 错误处理
 
@@ -242,11 +276,12 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 - `models.mjs`：各厂商列表解析（固定样本）、models.dev 合并与默认值、过滤规则、部分失败回退、全部失败返回原值、401 抛 `signIn: "expired"`。
 - `errors.mjs`：7.1 表格每一行。
 - `cf.mjs`：`provider_configs` 分页、别名过滤、401 / 403 / 其他错误的分类。
+- `cfcatalog.mjs`：用手写的小样本页面（不提交下载的目录页）测解析（只取 Text Generation、作者与 ID 取自链接、保留带点的 ID、忽略 tts / 图像 / ASR 与 `@cf` 模型、无匹配返回 `[]`、条目内多余空白与换行）与 6.2 的缓存规则；`models.mjs` 模式 B：键为目录 ID、不请求网关列表、按托管 key 过滤、元数据查找顺序、回退时写 warn、与模式 A 分开缓存。
 - `index.mjs`：`authorize` 的规范化与校验、`config` 钩子、`models` 钩子的空列表回退。
 
 ### 8.3 集成测试
 
-沙箱运行 magpie（`HOME`、`XDG_*` 指向临时目录，`MAGPIE_ADDR=127.0.0.1:3499`）：从 `.env.local` 直接写入沙箱的 `plugin-auth.json`（`plugin login` 是交互式的，且会让 token 经过终端；登录流程由 `authorize` 单元测试和 8.5 人工验收覆盖），然后 `plugin add ./`、`plugin --json`、对每个厂商两种模式各跑 `provider test`。`plugin --json` 的原始输出含账号名（网关、账号 ID 前 8 位）与 magpie 的 `accounts[].hint`（token 末 4 位），只写在沙箱临时目录（退出即删），终端只打印 `scripts/listing.mjs` 生成的摘要：各厂商前缀的模型数与 npm 包集合。
+沙箱运行 magpie（`HOME`、`XDG_*` 指向临时目录，`MAGPIE_ADDR=127.0.0.1:3499`）：从 `.env.local` 直接写入沙箱的 `plugin-auth.json`（`plugin login` 是交互式的，且会让 token 经过终端；登录流程由 `authorize` 单元测试和 8.5 人工验收覆盖），然后 `plugin add ./`、`plugin --json`、对每个厂商两种模式各跑 `provider test`。`plugin --json` 的原始输出含账号名（网关、账号 ID 前 8 位）与 magpie 的 `accounts[].hint`（token 末 4 位），只写在沙箱临时目录（退出即删），终端只打印 `scripts/listing.mjs` 生成的摘要：各厂商前缀的模型数、npm 包集合与模型 ID（模型 ID 不含账号信息）。
 
 ### 8.4 BYOK 生效验证
 
@@ -272,6 +307,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 | CF 原生入口或 REST 行为变更 | 请求失败 | 映射表集中在 `vendors.mjs`；集成测试脚本可随时重跑 |
 | 厂商列表接口不经网关透传（V2） | 列表依赖 models.dev，新模型滞后 | 回退路径已是一等公民；用户仍可手动在 magpie 中补模型 |
 | models.dev 下线或格式变化 | 元数据缺失 | 本地缓存 + 默认元数据 |
+| Cloudflare 目录页面改版或取不到 | 模式 B 列表缺失 | 解析为 0 条按失败处理：先用过期缓存，再回退 models.dev `cloudflare-ai-gateway`，写 warn（6.2） |
 | 误走统一计费 | 意外扣费 | 默认 `cf-aig-no-wholesale: true`；README 建议网关开启 `byok_only` |
 
 ## 11. 实测记录（2026-10-08）
@@ -385,5 +421,23 @@ REST 模式（2026-10-08 复测，Google、DeepSeek、xAI 已为 `rest: null`）
 
 #### 其他发现
 
-- REST 的模型 ID 是 Cloudflare 模型目录的 ID，不一定等于厂商原生 ID。目录只是子集（如 OpenAI 的 `chat-latest`、`gpt-5.1-chat-latest` 不在其中）；Anthropic 带小版本号的模型在目录里用点（`claude-sonnet-5.5`，原生为 `claude-sonnet-5-5`）。插件在模式 B 下仍按第 6 节从厂商实时列表取模型、发送 `<restPrefix>/<原生ID>`。对照 2026-10-08 的目录页面，模式 B 列出的 OpenAI 59 个模型中有 22 个、Anthropic 14 个中有 3 个（`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`）的 ID 与目录一致；Anthropic 另有 7 个只差「`-数字-数字` → `-数字.数字`」。其余模型在模式 B 下请求失败：探测脚本的请求为 404 "Model not found"，经 magpie 为 500（11.5）。**待决定**：模式 B 是否按目录过滤列表、转换 ID，或另作处理。
+- REST 的模型 ID 是 Cloudflare 模型目录的 ID，不一定等于厂商原生 ID。目录只是子集（如 OpenAI 的 `chat-latest`、`gpt-5.1-chat-latest` 不在其中）；Anthropic 带小版本号的模型在目录里用点（`claude-sonnet-5.5`，原生为 `claude-sonnet-5-5`）。插件在模式 B 下仍按第 6 节从厂商实时列表取模型、发送 `<restPrefix>/<原生ID>`。对照 2026-10-08 的目录页面，模式 B 列出的 OpenAI 59 个模型中有 22 个、Anthropic 14 个中有 3 个（`claude-opus-5`、`claude-sonnet-5`、`claude-fable-5`）的 ID 与目录一致；Anthropic 另有 7 个只差「`-数字-数字` → `-数字.数字`」。其余模型在模式 B 下请求失败：探测脚本的请求为 404 "Model not found"，经 magpie 为 500（11.5）。**已决定**（用户批准）：模式 B 改为只列目录里的模型，模型键用目录 ID（6.2），实测见 11.7。
 - 原生入口复测：运行 1 各项与 11.2 相同（V1、V2、V6、V7 均 200）。运行 2 中脚本为 OpenAI 选中了 `gpt-5.1-chat-latest`（列表顺序变化），`V1.openai.responses` 30 秒超时；其余原生项为 200。该项与 REST 无关，未深究。
+
+### 11.7 Task 11：模式 B 按目录列模型（2026-10-08）
+
+- 运行一次：`scripts/sandbox.sh rest anthropic/claude-haiku-4.5 openai/gpt-4.1-nano anthropic/claude-sonnet-5.5`。输出经过脱敏过滤，不含账号 ID、网关名或 token，也没有记录模型输出。
+- 插件列表：`cloudflare-ai-gateway` 已登录，共 38 个模型，只有两家：
+  - `anthropic` 13 个（`@ai-sdk/anthropic`）；
+  - `openai` 25 个（`@ai-sdk/openai`）。
+- 列表中全部是目录 ID，例如 `claude-sonnet-5.5`、`claude-haiku-4.5`、`claude-opus-4.8`、`gpt-4.1-nano`、`gpt-5.5`、`o4-mini`。没有 Google、DeepSeek、xAI，也没有厂商原生写法的 ID（如 `claude-sonnet-5-5`）。11.5 时模式 B 列出 73 个模型，大多数请求失败。
+- 运行后用 `loadCfCatalog` 直接解析线上目录页（只读公开文档，不涉及账号），得到 64 个 Text Generation 条目：OpenAI 25 个、Anthropic 13 个，与插件列表一致。models.dev `cloudflare-ai-gateway` 里这两家也是同样的 38 个 ID。
+- 本次没有查网关日志。11.6 已证实这两个前缀在模式 B 下使用托管 key。
+
+| 厂商 | 模型（目录 ID） | magpie 协议 | `provider test` |
+|---|---|---|---|
+| Anthropic | `anthropic/claude-haiku-4.5` | anthropic | 通过（1599 ms） |
+| OpenAI | `openai/gpt-4.1-nano` | responses | 通过（3488 ms） |
+| Anthropic | `anthropic/claude-sonnet-5.5`（带点的 ID，原生为 `claude-sonnet-5-5`） | anthropic | 通过（1451 ms） |
+
+脚本退出码为 0。
