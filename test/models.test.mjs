@@ -453,6 +453,17 @@ describe("listModels", () => {
     expect(m.cost.input).toBe(3)
   })
 
+  test("a dated snapshot of a deprecated model is left out with it", async () => {
+    const catalog = { ...CATALOG, openai: { models: { "o-old": { id: "o-old", name: "O Old", status: "deprecated" } } } }
+    const f = fakeFetch([
+      configs([row("openai")]),
+      ["/openai/models", json({ data: [{ id: "o-old" }, { id: "o-old-2025-01-31" }, { id: "gpt-x-2025-01-31" }] })],
+      ["models.dev", json(catalog)],
+    ])
+    const models = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    expect(Object.keys(models)).toEqual(["openai/gpt-x-2025-01-31"])
+  })
+
   test("xAI's grok-imagine models stay out though models.dev is down", async () => {
     const f = fakeFetch([
       configs([row("grok")]),

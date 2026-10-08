@@ -168,7 +168,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 3. **回退**：某厂商实时列表失败（含 V2 不成立的情况，不含第 2 步的 2044）→ 用 models.dev 中该厂商原生目录的全部模型（模型 ID 取目录的键，不取条目里的 `id` 字段）。
 4. **元数据合并**：按原生 ID 匹配 models.dev 原生目录，补 `name`、`limit`、`reasoning`/`variants`、`tool_call`、`temperature`、`modalities`、`cost`。精确 ID 没有条目时，去掉末尾的日期后缀（`-YYYY-MM-DD` 或 `-YYYYMMDD`）再查一次，日期快照借用基础模型的元数据，但不借用名称（避免与基础模型同名）。每个字段的取值优先级：models.dev → 实时列表自带的信息（Anthropic 的 `display_name`、Google 的 `displayName` 与 token 上限）→ 默认值（上下文 128000、输出 16384、支持工具调用、不推理、不支持 `temperature`：与 magpie 自身的 `temperature ?? false` 一致，推理模型会拒绝 temperature）。
 5. **过滤**：
-   - 去掉 `status: "deprecated"`；
+   - 去掉 `status: "deprecated"`（日期快照经第 4 步借用基础模型的元数据，所以基础模型已弃用时快照一并去掉，例如 `o4-mini-2025-04-16`）；
    - ID 含 `embed`、`-tts`、`image`、`audio`、`-live`、`realtime`、`moderation`、`whisper`、`dall-e`、`sora`、`transcribe`、`computer-use`、`deep-research` 的（参照 magpie `textModel`；这是各厂商共用的子串启发式，可能漏判或误判）；
    - 命中该厂商 `list.skip` 正则的 ID（`vendors.mjs`，只作用于本厂商，不依赖 models.dev）：OpenAI 只支持旧 Completions 的 `davinci-002`、`babbage-002`、`gpt-3.5-turbo-instruct*` 与只支持 Chat Completions 的 `*-search-preview*`、`*-search-api*`（走 Responses 会 400）；Google 的 Lyria（音乐）与 nano-banana（图像）；xAI 的 `grok-imagine-*`（图像 / 视频）；
    - models.dev 标明输出不含 `text` 的。
