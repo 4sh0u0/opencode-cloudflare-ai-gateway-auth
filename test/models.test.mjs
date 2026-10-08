@@ -360,6 +360,15 @@ describe("listModels", () => {
     })
   })
 
+  test("the expired sign-in says which token permissions to check, never the token", async () => {
+    const f = fakeFetch([["/provider_configs", json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] }, 401)]])
+    const e = await listModels({ account: { ...ACCOUNT, token: "secret-token-value" }, directory: dir, fetchImpl: f }).catch((e) => e)
+    expect(e.signIn).toBe("expired")
+    expect(e.message).toContain("exists")
+    expect(e.message).toContain("AI Gateway Run and Read")
+    expect(e.message).not.toContain("secret-token-value")
+  })
+
   test("a malformed token expires the sign-in, though Cloudflare answers 400", async () => {
     const f = fakeFetch([
       [

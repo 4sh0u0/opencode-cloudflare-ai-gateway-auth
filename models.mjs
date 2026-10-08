@@ -252,9 +252,12 @@ async function collectModels({ account, directory, fetchImpl = fetch, log = () =
     slugs = await byokSlugs(account, { fetchImpl })
   } catch (e) {
     if (tokenRefused(e))
-      throw Object.assign(new Error(`Cloudflare refused the API token (${e.message}); sign in again`), {
-        signIn: "expired",
-      })
+      throw Object.assign(
+        new Error(
+          `Cloudflare refused the API token (${e.message}). Check that the token exists and has AI Gateway Run and Read, then sign in again`,
+        ),
+        { signIn: "expired" },
+      )
     log("warn", `Couldn't read the gateway's stored keys, so every vendor is listed: ${e.message}`)
   }
   // a vendor the account's mode can't reach (rest: null after the probe) is left out
