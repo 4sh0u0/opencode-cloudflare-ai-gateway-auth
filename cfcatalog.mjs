@@ -11,7 +11,8 @@ export const CF_CATALOG = "https://developers.cloudflare.com/ai/models/index.md"
 const ENTRY_LINK = /\]\(https:\/\/developers\.cloudflare\.com\/ai\/models\/([^@/\s()][^/\s()]*)\/([^/\s()]+)\/?\)/
 
 // parseCfCatalog reads the catalog page's Text Generation models as
-// [{author, id}]. Each entry is a link, [![<logo>](…)<h3><id></h3> <Author><Task> <description>](<model page>),
+// [{author, id}]. Each entry is one link:
+//   [![<logo>](…)<h3><id></h3> <Author><Task> <description>](<model page>)
 // so the page is split at each entry's start, the author and id read from
 // the link, and the task from the text before it.
 export function parseCfCatalog(markdown) {
