@@ -17,7 +17,13 @@ sb=$(mktemp -d)
 trap 'rm -rf "$sb"' EXIT
 mkdir -p "$sb/.config/opencode" "$sb/.local/share/opencode" "$sb/.local/state" "$sb/.cache" "$sb/work"
 oc() {
-  (cd "$sb/work" && env HOME="$sb" XDG_CONFIG_HOME="$sb/.config" XDG_DATA_HOME="$sb/.local/share" \
+  # Drop the caller's cloud and provider variables so only the seeded sign-in
+  # and config reach OpenCode (its built-in loaders read these).
+  local drop=() name
+  while IFS= read -r name; do drop+=(-u "$name"); done < <(
+    compgen -e | grep -E '^(CLOUDFLARE_|CF_|OPENCODE|ANTHROPIC_|OPENAI_|GOOGLE_|GEMINI_|DEEPSEEK_|XAI_)' || true
+  )
+  (cd "$sb/work" && env ${drop[@]+"${drop[@]}"} HOME="$sb" XDG_CONFIG_HOME="$sb/.config" XDG_DATA_HOME="$sb/.local/share" \
     XDG_STATE_HOME="$sb/.local/state" XDG_CACHE_HOME="$sb/.cache" npm_config_cache="$npm_cache" \
     npx -y "opencode-ai@$version" "$@")
 }
@@ -51,8 +57,9 @@ status=0
 # A provider with no models is dropped, and `opencode models <provider>` then
 # fails with "Provider not found"; with a refused token, list them all instead.
 if [ -n "${BAD_TOKEN:-}" ]; then list=(models); else list=(models cloudflare-ai-gateway); fi
-oc "${list[@]}" --print-logs >"$sb/models.txt" 2>"$sb/models.log" || {
+oc "${list[@]}" --print-logs </dev/null >"$sb/models.txt" 2>"$sb/models.log" || {
   echo "FAILED: opencode ${list[*]} exited non-zero"
+  tail -n 30 "$sb/models.log" | redact
   status=1
 }
 echo "== $(grep -c '^cloudflare-ai-gateway/' "$sb/models.txt" || true) models listed"
@@ -70,7 +77,7 @@ fi
 
 for model in "$@"; do
   echo "== $model"
-  if oc run -m "cloudflare-ai-gateway/$model" --print-logs "Reply with the single word OK." >"$sb/run.txt" 2>"$sb/run.log" &&
+  if oc run -m "cloudflare-ai-gateway/$model" --print-logs "Reply with the single word OK." </dev/null >"$sb/run.txt" 2>"$sb/run.log" &&
     grep -qiw 'ok' "$sb/run.txt"; then
     redact <"$sb/run.txt"
   else
