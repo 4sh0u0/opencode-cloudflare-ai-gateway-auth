@@ -1,5 +1,7 @@
 # opencode-cloudflare-ai-gateway-auth
 
+English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+
 A [magpie](https://usemagpie.ai) provider plugin that sends your requests through
 [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) and pays for
 them with the provider keys stored in your gateway (BYOK), not Cloudflare's Unified
@@ -19,10 +21,11 @@ Billing. It also lists the models your gateway can reach.
 ## Install
 
 ```sh
-magpie plugin add opencode-cloudflare-ai-gateway-auth
+magpie plugin add github:4sh0u0/opencode-cloudflare-ai-gateway-auth
 ```
 
-or, in the app, **Plugins → Add a plugin**.
+or, in the app, find it under **Plugins → Discover → Unofficial**. A local copy works
+too: `magpie plugin add /path/to/folder`, or **Plugins → Add a plugin** with the folder.
 
 ## Sign in
 
