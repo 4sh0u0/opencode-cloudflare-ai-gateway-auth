@@ -6,6 +6,7 @@
   "main": "./index.mjs",
   "files": [
     "index.mjs",
+    "host.mjs",
     "vendors.mjs",
     "route.mjs",
     "errors.mjs",
