@@ -11,7 +11,14 @@ export const OPENCODE = "opencode"
 
 const FELL_BACK = Symbol.for("magpie.fellBack")
 
-const said = (e) => (e instanceof Error ? e.message : String(e))
+// said never throws: String(e) does for values such as Object.create(null).
+const said = (e) => {
+  try {
+    return e instanceof Error ? e.message : String(e)
+  } catch {
+    return "an error that can't be shown"
+  }
+}
 
 // cacheHome is the folder for caches by the XDG rules OpenCode follows:
 // XDG_CACHE_HOME when it is an absolute path, else ~/.cache.
@@ -52,7 +59,7 @@ export function hostOf(input, { env = process.env, home = homedir() } = {}) {
     variants: false,
     signedOut: () => ({}),
     empty(_provider, log) {
-      log("warn", "Nothing to list: the gateway holds no key this sign-in can use for a vendor the plugin serves")
+      log("warn", "Nothing to list: the gateway holds no key this sign-in can use for a vendor the plugin serves, or every list failed (see the warnings above, if any)")
       return {}
     },
     failed(error, log) {

@@ -6,10 +6,14 @@
 #   OPENCODE_VERSION picks the release (default 1.18.35).
 #   BAD_TOKEN=1 seeds a token Cloudflare refuses and only lists, to check the
 #   refusal is logged and doesn't break OpenCode.
+#   VARIANT=high runs each prompt at that reasoning level.
 set -euo pipefail
 mode=${1:?usage: scripts/opencode-sandbox.sh <native|rest> <vendor/model>...}
+case "$mode" in native | rest) ;; *) echo "usage: $0 <native|rest> <vendor/model>..." >&2; exit 2 ;; esac
 shift
 version=${OPENCODE_VERSION:-1.18.35}
+variant=()
+if [ -n "${VARIANT:-}" ]; then variant=(--variant "$VARIANT"); fi
 root=$(cd "$(dirname "$0")/.." && pwd)
 # npx keeps its download in the real npm cache, not the throwaway HOME
 npm_cache=$(npm config get cache)
@@ -77,7 +81,7 @@ fi
 
 for model in "$@"; do
   echo "== $model"
-  if oc run -m "cloudflare-ai-gateway/$model" --print-logs "Reply with the single word OK." </dev/null >"$sb/run.txt" 2>"$sb/run.log" &&
+  if oc run -m "cloudflare-ai-gateway/$model" ${variant[@]+"${variant[@]}"} --print-logs "Reply with the single word OK." </dev/null >"$sb/run.txt" 2>"$sb/run.log" &&
     grep -qiw 'ok' "$sb/run.txt"; then
     redact <"$sb/run.txt"
   else

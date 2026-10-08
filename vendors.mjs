@@ -26,7 +26,7 @@ const ANTHROPIC_VERSION = { "anthropic-version": "2023-06-01" }
 // models.dev; models.mjs also drops the ids its NOT_TEXT words match.
 export const VENDORS = [
   {
-    prefix: "openai", // the model key's prefix in magpie
+    prefix: "openai", // the model key's prefix
     slug: "openai", // the gateway's provider slug, for BYOK and native URLs
     restPrefix: "openai", // the model prefix the REST API takes
     catalog: "openai", // the models.dev provider holding its metadata

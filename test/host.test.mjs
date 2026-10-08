@@ -90,4 +90,10 @@ describe("what each host lists", () => {
       ["error", "Couldn't list the models: plain words"],
     ])
   })
+
+  test("OpenCode's failure message holds up for values that can't be turned into text", () => {
+    const { logs, log } = recorder()
+    expect(opencode.failed(Object.create(null), log)).toEqual({})
+    expect(logs).toEqual([["error", "Couldn't list the models: an error that can't be shown"]])
+  })
 })

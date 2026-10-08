@@ -54,7 +54,7 @@ opencode auth login
 | BYOK key alias | 仅原生模式需要；留空即使用 `default` key |
 | API key | 上面那个 Cloudflare API token |
 
-- TUI 的 `/connect` 会问同样的问题，但输入时不做检查；填错的话，第一次请求时会提示你重新登录。
+- TUI 的 `/connect` 会问同样的问题，但输入时不做检查：填错的话，该供应商不会出现在模型列表里，`opencode models --print-logs` 会写明哪里不对，重新登录即可。
 - OpenCode 的 Web 和桌面 app 只会问 key，这不够用：请在终端里登录。
 - OpenCode 每个供应商只保存一份登录。再登录一次会替换它，比如轮换 token、换网关或换模式。
 - 插件接管该供应商的 `baseURL`：配置里给 `cloudflare-ai-gateway` 设置的 `baseURL` 会被替换。
@@ -95,11 +95,10 @@ REST 模式只能访问 OpenAI 和 Anthropic。通过 REST 时，Cloudflare 经 
 | 现象 | 含义 |
 |---|---|
 | 模型列表为空，或者看不到这个供应商 | 运行 `opencode models --print-logs`：插件会在日志里写明原因（token 被拒、登录信息无效，或网关里没有存 key）。OpenCode 也会把日志保存在 `~/.local/share/opencode/log/` |
-| 请求时提示重新登录 | 保存的登录里，账号、网关或 key 别名无效：重新运行 `opencode auth login` |
 | `Plugin requires opencode >=1.18.35 <2` | 你的 OpenCode 低于 1.18.35，或者是 2.x |
 | 模型返回 400（REST 模式：402 或 403） | 网关在你的别名下没有该厂商的 key（原生模式：code 2044）。400 也可能是插件在发出请求前就拒绝了它，例如厂商前缀未知、模型 ID 不是 `<vendor>/<model>` 形式，或在 REST 模式下使用 Google、DeepSeek 或 xAI；错误消息会说明是哪一种 |
 | REST 模式下某个模型返回 404 或 500 | Cloudflare 的模型目录中没有这个 ID 的模型（例如用了厂商自己的 `claude-sonnet-5-5`，而目录中是 `claude-sonnet-5.5`）：请选择列表中的模型，或改用原生模式 |
-| 厂商返回 401 | 厂商拒绝了网关中存储的 key |
+| 厂商返回 401 | 厂商拒绝了网关中存储的 key。如果错误里带有 Cloudflare 的错误码 2009（原生模式）或 10000（REST 模式），则是你的 API token 被拒：重新登录即可 |
 | 缺少某个模型 | 它的厂商在网关中没有 key，或者它不是聊天模型；在 REST 模式下，不在 Cloudflare 目录中的模型也不会出现 |
 
 ## 在 magpie 中使用

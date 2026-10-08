@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Integration check: runs magpie with a throwaway HOME, this folder as its
-# plugin and an account seeded from .env.local, prints a redacted summary of
-# the model list, then tests each model given.
+# plugin and an account seeded from .env.local, then prints magpie's output
+# and a summary of the model list, with the account ID, gateway ID and token
+# hidden, and tests each model given.
 # Usage: scripts/sandbox.sh <native|rest> <model key>...
 set -euo pipefail
 mode=${1:?usage: scripts/sandbox.sh <native|rest> <model key>...}
+case "$mode" in native | rest) ;; *) echo "usage: $0 <native|rest> <model key>..." >&2; exit 2 ;; esac
 shift
 root=$(cd "$(dirname "$0")/.." && pwd)
 sb=$(mktemp -d)
 trap 'rm -rf "$sb"' EXIT
 m() { env HOME="$sb" XDG_CONFIG_HOME="$sb/.config" XDG_CACHE_HOME="$sb/.cache" MAGPIE_ADDR=127.0.0.1:3499 magpie "$@"; }
+# What magpie prints can name the account (gateway · account ID prefix); only redacted text is shown.
+redact() { (cd "$root" && bun --env-file=.env.local scripts/redact.mjs); }
 
 mkdir -p "$sb/.config/magpie"
 # Seed the sign-in the way magpie keeps it (plugin-auth.json), so the token
@@ -25,13 +29,13 @@ mkdir -p "$sb/.config/magpie"
 ')
 chmod 600 "$sb/.config/magpie/plugin-auth.json"
 
-m plugin add "$root" </dev/null
+m plugin add "$root" </dev/null 2>&1 | redact
 # The raw listing names the account and holds the token's last characters,
 # so it stays in the sandbox (removed on exit); only a summary is printed.
 m plugin --json >"$sb/plugin.json"
 status=0
-bun "$root/scripts/listing.mjs" "$sb/plugin.json" || status=1
+bun "$root/scripts/listing.mjs" "$sb/plugin.json" | redact || status=1
 for model in "$@"; do
-  m provider test cloudflare-ai-gateway "$model" || { echo "FAILED: $model"; status=1; }
+  m provider test cloudflare-ai-gateway "$model" </dev/null 2>&1 | redact || { echo "FAILED: $model"; status=1; }
 done
 exit $status

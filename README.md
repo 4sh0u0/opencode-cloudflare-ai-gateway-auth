@@ -66,7 +66,8 @@ Pick **Cloudflare AI Gateway**, then answer:
 | API key | The Cloudflare API token above |
 
 - The TUI's `/connect` asks the same questions but doesn't check the answers as you
-  type them; a mistake shows up on the first request, which asks you to sign in again.
+  type them: with a mistake, the provider doesn't show up in the model list, and
+  `opencode models --print-logs` says what's wrong. Sign in again to fix it.
 - OpenCode's web and desktop apps ask only for the key, which isn't enough: sign in
   from the terminal.
 - OpenCode keeps one sign-in per provider. Signing in again replaces it, e.g. to
@@ -136,11 +137,10 @@ answers 403 (code 2049). To allow the fallback, give the plugin an option:
 | You see | Meaning |
 |---|---|
 | The model list is empty, or the provider is missing | Run `opencode models --print-logs`: the plugin logs why (the token was refused, the sign-in isn't valid, or the gateway holds no keys). OpenCode also keeps its logs in `~/.local/share/opencode/log/` |
-| A request asks you to sign in again | The saved sign-in's account, gateway or key alias isn't valid: run `opencode auth login` again |
 | `Plugin requires opencode >=1.18.35 <2` | Your OpenCode is older than 1.18.35, or is 2.x |
 | 400 from a model (REST mode: 402 or 403) | The gateway holds no key for that vendor under your alias (native mode: code 2044). A 400 can also be the plugin refusing the request before sending it, e.g. an unknown vendor prefix, a model ID that isn't `<vendor>/<model>`, or Google, DeepSeek or xAI in REST mode; its message says which |
 | 404 or 500 from a model in REST mode | Cloudflare's model catalog has no model by that ID (e.g. a vendor's own `claude-sonnet-5-5` for the catalog's `claude-sonnet-5.5`): pick a listed model, or use native mode |
-| 401 from a vendor | The vendor refused the key stored in the gateway |
+| 401 from a vendor | The vendor refused the key stored in the gateway. If the error carries Cloudflare's code 2009 (native mode) or 10000 (REST mode), it's your API token that was refused: sign in again |
 | A model is missing | Its vendor has no key in the gateway, or it isn't a chat model; in REST mode, also any model that isn't in Cloudflare's catalog |
 
 ## Using it with magpie
