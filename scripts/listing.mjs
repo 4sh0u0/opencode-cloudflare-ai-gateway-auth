@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 // Summarizes `magpie plugin --json` for this plugin: per vendor prefix, the
-// model count and the AI SDK packages. The raw listing names the account
-// (gateway, account ID prefix) and holds magpie's accounts[].hint, the
-// token's last characters, so it stays in the sandbox and only this summary
-// is printed. Run with: bun scripts/listing.mjs <listing.json>
+// model count, the AI SDK packages and the model ids. The raw listing names
+// the account (gateway, account ID prefix) and holds magpie's
+// accounts[].hint, the token's last characters, so it stays in the sandbox
+// and only this summary is printed. Run with:
+// bun scripts/listing.mjs <listing.json>
 import { PROVIDER } from "../vendors.mjs"
 
 export function summarize(listing) {
@@ -13,15 +14,19 @@ export function summarize(listing) {
   const vendors = {}
   for (const m of models) {
     const prefix = String(m?.id ?? "").split("/")[0]
-    vendors[prefix] ??= { count: 0, npm: new Set() }
+    vendors[prefix] ??= { count: 0, npm: new Set(), ids: [] }
     vendors[prefix].count++
     vendors[prefix].npm.add(m?.npm ?? m?.api?.npm ?? "?")
+    vendors[prefix].ids.push(String(m?.id ?? "").slice(prefix.length + 1))
   }
   return [
     `${PROVIDER}: signed in ${provider.signedIn === true}, ${models.length} models`,
     ...Object.keys(vendors)
       .sort()
-      .map((prefix) => `  ${prefix}: ${vendors[prefix].count} models, npm ${[...vendors[prefix].npm].sort().join(", ")}`),
+      .flatMap((prefix) => [
+        `  ${prefix}: ${vendors[prefix].count} models, npm ${[...vendors[prefix].npm].sort().join(", ")}`,
+        `    ${vendors[prefix].ids.sort().join(" ")}`,
+      ]),
   ]
 }
 

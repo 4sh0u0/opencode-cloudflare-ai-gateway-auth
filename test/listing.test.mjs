@@ -22,12 +22,15 @@ const LISTING = {
 }
 
 describe("summarize", () => {
-  test("counts each vendor's models and AI SDK packages", () => {
+  test("counts each vendor's models and AI SDK packages, and names its models", () => {
     expect(summarize(LISTING)).toEqual([
       "cloudflare-ai-gateway: signed in true, 4 models",
       "  anthropic: 1 models, npm @ai-sdk/anthropic",
+      "    claude-x",
       "  google: 1 models, npm @ai-sdk/openai-compatible",
+      "    gemini-x",
       "  openai: 2 models, npm @ai-sdk/openai",
+      "    gpt-x gpt-y",
     ])
   })
 
