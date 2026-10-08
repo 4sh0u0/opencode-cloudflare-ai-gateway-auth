@@ -58,7 +58,7 @@ export const VENDORS = [
     restPrefix: "google",
     catalog: "google",
     // chat is the default because magpie sends @ai-sdk/google plugin models as
-    // Code Assist, which neither route.mjs nor the gateway speaks (spec 11.5).
+    // Code Assist, which neither route.mjs nor the gateway speaks (spec 11, V8).
     // gemini's path is what comes before /models/<id>:<method>
     native: { protocol: "chat", paths: { gemini: "/v1beta", chat: "/v1beta/openai/chat/completions" } },
     rest: "chat",

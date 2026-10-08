@@ -48,7 +48,7 @@ magpie's `plugin-auth.json` (mode 600).
 
 Models are named `<vendor>/<model>`; agents reach them as
 `cloudflare-ai-gateway/<vendor>/<model>`, e.g.
-`cloudflare-ai-gateway/anthropic/claude-sonnet-5.5`.
+`cloudflare-ai-gateway/anthropic/claude-sonnet-5-5`.
 
 | Vendor | Prefix | Native mode API | REST mode API |
 |---|---|---|---|

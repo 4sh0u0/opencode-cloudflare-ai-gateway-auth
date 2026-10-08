@@ -65,7 +65,7 @@
 
 ### 3.2 模型命名
 
-- 插件内部模型键 = `<统一前缀>/<原生ID>`，例如 `anthropic/claude-sonnet-5.5`、`openai/gpt-5.5`、`xai/grok-4.3`。
+- 插件内部模型键 = `<统一前缀>/<原生ID>`，例如 `anthropic/claude-sonnet-5-5`（Anthropic 原生 ID 用连字符）、`openai/gpt-5.5`、`xai/grok-4.3`。
 - agent 中写作 `cloudflare-ai-gateway/<模型键>`。
 - 模型的 API id（`api.id`）等于模型键，所以 `fetch` 收到的请求体 `model` 永远带厂商前缀，路由据此判断厂商。
 
