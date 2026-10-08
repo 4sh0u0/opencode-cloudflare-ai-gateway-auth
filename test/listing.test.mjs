@@ -34,6 +34,19 @@ describe("summarize", () => {
     ])
   })
 
+  test("counts fine-tuned ids, which carry the org name, without printing them", () => {
+    const listing = structuredClone(LISTING)
+    listing.providers[1].models.push(
+      { id: "openai/ft:gpt-x:acme-corp::AbC123", npm: "@ai-sdk/openai" },
+      { id: "openai/ft:gpt-y:acme-corp:suffix:DeF456", npm: "@ai-sdk/openai" },
+    )
+    const lines = summarize(listing)
+    expect(lines).toContain("  openai: 4 models, npm @ai-sdk/openai")
+    expect(lines).toContain("    gpt-x gpt-y")
+    expect(lines).toContain("    2 fine-tuned models (ids hidden)")
+    expect(lines.join("\n")).not.toContain("acme-corp")
+  })
+
   test("leaves out everything about the account", () => {
     const text = summarize(LISTING).join("\n")
     for (const secret of ["my-gateway", "01234567", "WXYZ"]) expect(text).not.toContain(secret)
