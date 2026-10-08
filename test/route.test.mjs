@@ -148,6 +148,22 @@ describe("REST mode", () => {
     }
   })
 
+  test("the same vendors are refused in the Responses and Messages shapes too", () => {
+    for (const [path, protocol] of [["/responses", "responses"], ["/messages", "messages"]])
+      for (const model of ["google/gemini-x", "deepseek/deepseek-x", "xai/grok-9"]) {
+        const [url, init] = request(path, { model, input: "hi", messages: [] })
+        let caught
+        try {
+          route(url, init, REST)
+        } catch (e) {
+          caught = e
+        }
+        expect(caught).toBeInstanceOf(RouteError)
+        expect(caught.protocol).toBe(protocol)
+        expect(caught.message).toContain("native mode")
+      }
+  })
+
   test("Gemini's API has no REST endpoint", () => {
     const [url, init] = request("/models/google/gemini-x:generateContent", { contents: [] })
     expect(() => route(url, init, REST)).toThrow(RouteError)

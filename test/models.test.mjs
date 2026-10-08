@@ -639,6 +639,17 @@ describe("listModels", () => {
     })
   })
 
+  test("native mode never asks Cloudflare's model catalog page", async () => {
+    const f = fakeFetch([
+      configs([row("anthropic"), row("openai")]),
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+      ["/openai/models", json({ data: [{ id: "gpt-x" }] })],
+      ["models.dev", json(CATALOG)],
+    ])
+    expect(Object.keys(await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).sort()).toEqual(["anthropic/claude-x", "openai/gpt-x"])
+    expect(f.calls.some((c) => new URL(c.url).host === "developers.cloudflare.com")).toBe(false)
+  })
+
   test("a gateway with no keys lists nothing", async () => {
     const f = fakeFetch([configs([]), ["models.dev", json(CATALOG)]])
     expect(await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).toEqual({})
