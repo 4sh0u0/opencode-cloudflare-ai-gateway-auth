@@ -13,12 +13,13 @@ const ENTRY_LINK = /\]\(https:\/\/developers\.cloudflare\.com\/ai\/models\/([^@/
 // parseCfCatalog reads the catalog page's Text Generation models as
 // [{author, id}]. Each entry is one link:
 //   [![<logo>](…)<h3><id></h3> <Author><Task> <description>](<model page>)
-// so the page is split at each entry's start, the author and id read from
-// the link, and the task from the text before it.
+// Some entries have no logo image (a letter, or "Pinned", is in its place),
+// so the page is split at each entry's <h3> heading, the author and id read
+// from the link after it, and the task from the text between them.
 export function parseCfCatalog(markdown) {
   if (typeof markdown !== "string") return []
   const entries = []
-  for (const chunk of markdown.split("[![").slice(1)) {
+  for (const chunk of markdown.split("<h3>").slice(1)) {
     const link = ENTRY_LINK.exec(chunk)
     if (!link) continue
     if (!chunk.slice(0, link.index).replace(/\s+/g, " ").includes("Text Generation")) continue

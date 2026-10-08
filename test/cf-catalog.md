@@ -83,6 +83,14 @@ AnthropicText Generation A balanced model.](https://developers.cloudflare.com/ai
 
 Compare
 
+[d<h3>deepseek-x</h3>
+
+deepseekText Generation An entry whose logo is cut down to a letter.](https://developers.cloudflare.com/ai/models/deepseek/deepseek-x/)
+
+- Third-party
+
+Compare
+
 [![Google logo](https://developers.cloudflare.com/_astro/google.svg)<h3>gemini-x</h3>
 
 GoogleText Generation A multimodal model.](https://developers.cloudflare.com/ai/models/google/gemini-x/)

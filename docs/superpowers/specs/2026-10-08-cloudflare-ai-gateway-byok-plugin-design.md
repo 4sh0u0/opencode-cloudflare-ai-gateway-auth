@@ -201,10 +201,10 @@ REST 只接受 Cloudflare 模型目录里的 ID，且只有 OpenAI、Anthropic �
 
 - **来源**：`https://developers.cloudflare.com/ai/models/index.md`，即目录页面的 Markdown 版。目录没有机器可读的接口（1.1）。
 - **解析**（`cfcatalog.mjs` 的 `parseCfCatalog`）：
-  - 每个条目形如 `[![<Logo>](…)<h3><ID></h3>`，空行后接 `<作者><任务> <描述>](https://developers.cloudflare.com/ai/models/<author>/<ID>/)`。其他任务（`Text-to-Speech`、`Text-to-Image`、`Automatic Speech Recognition` 等）也是同样的形状。
-  - 按 `[![` 切分。作者与 ID 取自链接路径 `/ai/models/<author>/<ID>/`；只有链接之前的文本（空白归一后）含 `Text Generation` 的条目才保留。带点的 ID 原样保留。
+  - 每个条目形如 `[![<Logo>](…)<h3><ID></h3>`，空行后接 `<作者><任务> <描述>](https://developers.cloudflare.com/ai/models/<author>/<ID>/)`。其他任务（`Text-to-Speech`、`Text-to-Image`、`Automatic Speech Recognition` 等）也是同样的形状。有些条目没有 logo 图，开头只剩一个字母（如 `[d<h3>deepseek-v4-pro</h3>`），或是 `[Pinned![<Logo>](…)<h3>`。
+  - 按每个条目的 `<h3>` 标题切分（不按 `[![`，否则没有 logo 图的条目会被漏掉）。作者与 ID 取自标题之后的链接路径 `/ai/models/<author>/<ID>/`；只有标题与链接之间的文本（空白归一后）含 `Text Generation` 的条目才保留。带点的 ID 原样保留。
   - Workers AI 模型的链接是 `/ai/models/@cf/<author>/<ID>/`，作者以 `@` 开头，不匹配，不列出（1.4）。
-  - 2026-10-08 的页面有 172 个 `/<author>/<ID>/` 链接，其中 64 个是 Text Generation（OpenAI 25 个，Anthropic 13 个）。
+  - 2026-10-08 的页面有 172 个 `/<author>/<ID>/` 链接，其中 69 个是 Text Generation（OpenAI 25 个，Anthropic 13 个）。其中 5 个没有 logo 图（`deepseek/deepseek-v4-pro`、`thinkingmachines/inkling`、`thinkingmachines/inkling-256k`、`typesafe/jev`、`unbiased/pareto`）。
 - **缓存**：
   - 文件为 `<directory>/cloudflare-ai-gateway-auth/cf-catalog.json`，内容 `{fetchedAt, data: [{author, id}]}`。
   - 规则同 6.1：有效期 6 小时；刷新失败时用过期副本；失败后 10 分钟不重试。形状不对的文件视同没有，包括非数组、空数组、条目缺 `author` 或 `id` 字符串。
@@ -431,7 +431,8 @@ REST 模式（2026-10-08 复测，Google、DeepSeek、xAI 已为 `rest: null`）
   - `anthropic` 13 个（`@ai-sdk/anthropic`）；
   - `openai` 25 个（`@ai-sdk/openai`）。
 - 列表中全部是目录 ID，例如 `claude-sonnet-5.5`、`claude-haiku-4.5`、`claude-opus-4.8`、`gpt-4.1-nano`、`gpt-5.5`、`o4-mini`。没有 Google、DeepSeek、xAI，也没有厂商原生写法的 ID（如 `claude-sonnet-5-5`）。11.5 时模式 B 列出 73 个模型，大多数请求失败。
-- 运行后用 `loadCfCatalog` 直接解析线上目录页（只读公开文档，不涉及账号），得到 64 个 Text Generation 条目：OpenAI 25 个、Anthropic 13 个，与插件列表一致。models.dev `cloudflare-ai-gateway` 里这两家也是同样的 38 个 ID。
+- 运行后用 `loadCfCatalog` 直接解析线上目录页（只读公开文档，不涉及账号），OpenAI 25 个、Anthropic 13 个 Text Generation 条目与插件列表一致。models.dev `cloudflare-ai-gateway` 里这两家也是同样的 38 个 ID。
+- 评审后修正解析器（6.2，按 `<h3>` 切分）：按修正后的解析器，同日的页面副本共有 69 个 Text Generation 条目。修正前按 `[![` 切分，漏掉 5 个没有 logo 图的条目；它们都不属于 OpenAI 或 Anthropic，所以上面的列表与测试结果不受影响。
 - 本次没有查网关日志。11.6 已证实这两个前缀在模式 B 下使用托管 key。
 
 | 厂商 | 模型（目录 ID） | magpie 协议 | `provider test` |

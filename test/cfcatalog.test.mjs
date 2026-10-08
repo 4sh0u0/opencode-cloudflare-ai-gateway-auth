@@ -15,6 +15,7 @@ const TEXT_MODELS = [
   { author: "anthropic", id: "claude-haiku-4.5" },
   { author: "anthropic", id: "claude-sonnet-5.5" },
   { author: "anthropic", id: "claude-sonnet-5" },
+  { author: "deepseek", id: "deepseek-x" },
   { author: "google", id: "gemini-x" },
 ]
 
@@ -44,6 +45,20 @@ describe("parseCfCatalog", () => {
     const tts = PAGE.slice(PAGE.indexOf("[![OpenAI logo](https://developers.cloudflare.com/_astro/openai.svg)<h3>tts-1"))
     for (const text of ["", "# Models\n\nNo models found", tts.slice(0, tts.indexOf("Compare")), null, undefined, 42])
       expect(parseCfCatalog(text)).toEqual([])
+  })
+
+  // the real page starts some entries with a logo cut down to a letter, or
+  // with "Pinned" before it
+  test("reads entries without a logo image", () => {
+    const text = [
+      "[a<h3>claude-x.1</h3>\n\nanthropicText Generation A model.](https://developers.cloudflare.com/ai/models/anthropic/claude-x.1/)\n\nCompare\n",
+      "[Pinned![OpenAI logo](https://developers.cloudflare.com/_astro/openai.svg)<h3>gpt-x</h3>\n\nOpenAIText Generation A model.](https://developers.cloudflare.com/ai/models/openai/gpt-x/)\n\nCompare\n",
+      "[o<h3>tts-x</h3>\n\nopenaiText-to-Speech A voice.](https://developers.cloudflare.com/ai/models/openai/tts-x/)\n",
+    ].join("\n")
+    expect(parseCfCatalog(text)).toEqual([
+      { author: "anthropic", id: "claude-x.1" },
+      { author: "openai", id: "gpt-x" },
+    ])
   })
 
   test("tolerates extra whitespace and line breaks inside an entry", () => {
