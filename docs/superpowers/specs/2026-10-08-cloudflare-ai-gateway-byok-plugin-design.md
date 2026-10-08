@@ -169,7 +169,8 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 4. **元数据合并**：按原生 ID 匹配 models.dev 原生目录，补 `name`、`limit`、`reasoning`/`variants`、`tool_call`、`modalities`、`cost`。每个字段的取值优先级：models.dev → 实时列表自带的信息（Anthropic 的 `display_name`、Google 的 `displayName` 与 token 上限）→ 默认值（上下文 128000、输出 16384、支持工具调用、不推理）。
 5. **过滤**：
    - 去掉 `status: "deprecated"`；
-   - ID 含 `embed`、`-tts`、`image`、`audio`、`-live`、`realtime`、`moderation`、`whisper`、`dall-e`、`sora`、`transcribe`、`computer-use`、`deep-research` 的（参照 magpie `textModel`）；
+   - ID 含 `embed`、`-tts`、`image`、`audio`、`-live`、`realtime`、`moderation`、`whisper`、`dall-e`、`sora`、`transcribe`、`computer-use`、`deep-research` 的（参照 magpie `textModel`；这是各厂商共用的子串启发式，可能漏判或误判）；
+   - 命中该厂商 `list.skip` 正则的 ID（`vendors.mjs`，只作用于本厂商，不依赖 models.dev）：OpenAI 只支持旧 Completions 的 `davinci-002`、`babbage-002`、`gpt-3.5-turbo-instruct*` 与只支持 Chat Completions 的 `*-search-preview*`、`*-search-api*`（走 Responses 会 400）；Google 的 Lyria（音乐）与 nano-banana（图像）；xAI 的 `grok-imagine-*`（图像 / 视频）；
    - models.dev 标明输出不含 `text` 的。
 6. **输出**：键为模型键（`前缀/原生ID`），`api: {id: 模型键, url: 占位地址, npm: 按账号模式与 5.2 选择}`。单个厂商实时列表失败、改用 models.dev 补齐属于正常路径，只写日志，不标记回退。
 7. **最终列表为空**：返回 `provider.models` 的副本并打上 `Symbol.for("magpie.fellBack")`，magpie 保留它原有的列表。
@@ -303,7 +304,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 ### 11.4 其他发现
 
 - 官方文档（统一计费「Credential precedence」与 BYOK「Key aliases」）：REST `/ai/v1/*` 属统一计费端点，只认 `default` 别名的托管 key，`cf-aig-byok-alias` 只对原生入口生效；`default` 下没有 key 时回落统一计费（`cf-aig-no-wholesale` / `byok_only` 可阻止）。与 4.1「`alias` 仅 `mode == native` 时询问」一致，README 需说明。
-- xAI 实时列表含非文本模型 `grok-imagine-*`（含视频生成），其 id 不含第 6 节第 5 步的过滤词；若 models.dev 未标注其输出不含 `text`，会被列出。留给 Task 5 / 最终评审处理。
+- xAI 实时列表含非文本模型 `grok-imagine-*`（含视频生成），其 id 不含第 6 节第 5 步的过滤词；若 models.dev 未标注其输出不含 `text`，会被列出。最终评审已处理：xAI 的 `list.skip` 按 ID 过滤 `grok-imagine-*`（见第 6 节第 5 步）。
 
 ### 11.5 Task 7：沙箱集成（原生模式）
 

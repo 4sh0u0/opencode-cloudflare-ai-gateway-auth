@@ -21,6 +21,9 @@ export const PROTOCOL_PATHS = {
 
 const ANTHROPIC_VERSION = { "anthropic-version": "2023-06-01" }
 
+// list.skip matches the ids in a vendor's own list that don't chat over the
+// API the plugin declares for it. It is the vendor's alone and works without
+// models.dev; models.mjs also drops the ids its NOT_TEXT words match.
 export const VENDORS = [
   {
     prefix: "openai", // the model key's prefix in magpie
@@ -29,7 +32,14 @@ export const VENDORS = [
     catalog: "openai", // the models.dev provider holding its metadata
     native: { protocol: "responses", paths: { responses: "/responses", chat: "/chat/completions" } },
     rest: "responses",
-    list: { path: "/models", format: "openai", headers: {} },
+    list: {
+      path: "/models",
+      format: "openai",
+      headers: {},
+      // legacy Completions-only models, and search models that take only
+      // Chat Completions (Responses answers them 400)
+      skip: /^(?:babbage|davinci)-|-instruct(?:-|$)|-search-(?:api|preview)(?:-|$)/,
+    },
   },
   {
     prefix: "anthropic",
@@ -38,7 +48,7 @@ export const VENDORS = [
     catalog: "anthropic",
     native: { protocol: "messages", paths: { messages: "/v1/messages", chat: "/v1/chat/completions" } },
     rest: "messages",
-    list: { path: "/v1/models?limit=1000", format: "anthropic", headers: ANTHROPIC_VERSION },
+    list: { path: "/v1/models?limit=1000", format: "anthropic", headers: ANTHROPIC_VERSION, skip: null },
   },
   {
     prefix: "google",
@@ -52,7 +62,13 @@ export const VENDORS = [
     // gemini's path is what comes before /models/<id>:<method>
     native: { protocol: "chat", paths: { gemini: "/v1beta", chat: "/v1beta/openai/chat/completions" } },
     rest: "chat",
-    list: { path: "/v1beta/models?pageSize=1000", format: "gemini", headers: {} },
+    list: {
+      path: "/v1beta/models?pageSize=1000",
+      format: "gemini",
+      headers: {},
+      // Lyria makes music, nano-banana images, though both take generateContent
+      skip: /^lyria-|nano-banana/,
+    },
   },
   {
     prefix: "deepseek",
@@ -61,7 +77,7 @@ export const VENDORS = [
     catalog: "deepseek",
     native: { protocol: "chat", paths: { chat: "/chat/completions" } },
     rest: "chat",
-    list: { path: "/models", format: "openai", headers: {} },
+    list: { path: "/models", format: "openai", headers: {}, skip: null },
   },
   {
     prefix: "xai",
@@ -70,7 +86,8 @@ export const VENDORS = [
     catalog: "xai",
     native: { protocol: "chat", paths: { chat: "/v1/chat/completions", responses: "/v1/responses" } },
     rest: "chat",
-    list: { path: "/v1/models", format: "openai", headers: {} },
+    // grok-imagine-* make images and video
+    list: { path: "/v1/models", format: "openai", headers: {}, skip: /^grok-imagine/ },
   },
 ]
 

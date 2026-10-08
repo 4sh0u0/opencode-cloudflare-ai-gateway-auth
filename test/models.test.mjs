@@ -110,6 +110,45 @@ describe("isTextModel", () => {
     expect(isTextModel("grok-old", { status: "deprecated" })).toBe(false)
     expect(isTextModel("grok-imagine", { modalities: { output: ["image"] } })).toBe(false)
   })
+
+  // ids seen in the real sandbox listing (spec 11.5) that don't chat over the
+  // API the plugin declares for their vendor
+  const NOT_CHAT = {
+    openai: [
+      "davinci-002",
+      "babbage-002",
+      "gpt-3.5-turbo-instruct",
+      "gpt-3.5-turbo-instruct-0914",
+      "gpt-4o-search-preview",
+      "gpt-4o-search-preview-2025-03-11",
+      "gpt-4o-mini-search-preview",
+      "gpt-4o-mini-search-preview-2025-03-11",
+      "gpt-5-search-api",
+      "gpt-5-search-api-2025-10-14",
+    ],
+    google: ["lyria-3-clip-preview", "lyria-3-pro-preview", "lyria-3.5", "nano-banana-pro-preview", "gemini-nano-banana-2.1"],
+    xai: ["grok-imagine-image", "grok-imagine-video", "grok-imagine-video-1.0-lite"],
+  }
+
+  test("drops each vendor's non-chat ids by id alone, without models.dev", () => {
+    for (const [prefix, ids] of Object.entries(NOT_CHAT))
+      for (const id of ids) expect([prefix, id, isTextModel(id, undefined, vendorByPrefix(prefix))]).toEqual([prefix, id, false])
+  })
+
+  test("keeps the chat models beside them, and a vendor's patterns apply to it alone", () => {
+    const keep = [
+      ["openai", "gpt-4o"],
+      ["openai", "gpt-4o-2024-08-06"],
+      ["openai", "gpt-3.5-turbo-0125"],
+      ["openai", "gpt-5-chat-latest"],
+      ["google", "gemini-2.5-flash"],
+      ["google", "gemma-4-31b-it"],
+      ["xai", "grok-4.3"],
+      ["openai", "lyria-3.5"],
+      ["anthropic", "grok-imagine-video"],
+    ]
+    for (const [prefix, id] of keep) expect([prefix, id, isTextModel(id, undefined, vendorByPrefix(prefix))]).toEqual([prefix, id, true])
+  })
 })
 
 describe("buildModel", () => {
@@ -249,6 +288,16 @@ describe("listModels", () => {
     expect(models["openai/gpt-x"]).toBeDefined()
     expect(models["google/gemini-x"]).toBeDefined()
     expect(models["xai/grok-9"]).toBeDefined()
+  })
+
+  test("xAI's grok-imagine models stay out though models.dev is down", async () => {
+    const f = fakeFetch([
+      configs([row("grok")]),
+      ["/grok/v1/models", json({ data: [{ id: "grok-9" }, { id: "grok-imagine-video" }, { id: "grok-imagine-image" }] })],
+      ["models.dev", new Response("", { status: 503 })],
+    ])
+    const models = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    expect(Object.keys(models)).toEqual(["xai/grok-9"])
   })
 
   test("a gateway with no keys lists nothing", async () => {

@@ -22,6 +22,16 @@ describe("VENDORS", () => {
     expect(vendorByPrefix("google").slug).toBe("google-ai-studio")
   })
 
+  test("every vendor's list.skip is a stateless RegExp or null", () => {
+    for (const v of VENDORS) {
+      expect(v.list).toHaveProperty("skip")
+      if (v.list.skip !== null) {
+        expect(v.list.skip).toBeInstanceOf(RegExp)
+        expect(v.list.skip.global || v.list.skip.sticky).toBe(false)
+      }
+    }
+  })
+
   test("the provider id is fixed", () => {
     expect(PROVIDER).toBe("cloudflare-ai-gateway")
   })

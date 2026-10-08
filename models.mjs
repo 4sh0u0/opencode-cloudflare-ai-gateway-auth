@@ -8,7 +8,10 @@ export const MODELS_DEV = "https://models.dev/api.json"
 export const CACHE_TTL = 6 * 60 * 60 * 1000
 export const DEFAULT_LIMIT = { context: 128000, output: 16384 }
 
-// Ids of models that don't chat, after magpie's own textModel.
+// Words in the ids of models that don't chat, after magpie's own textModel.
+// A substring heuristic shared by every vendor: it can miss a model, or catch
+// one whose id merely holds a word. Each vendor's list.skip (vendors.mjs)
+// names its own exceptions.
 const NOT_TEXT = [
   "embed",
   "tts",
@@ -43,7 +46,10 @@ export function parseList(format, body) {
   return data.filter((m) => typeof m?.id === "string" && m.id).map((m) => ({ id: m.id, name: m.display_name }))
 }
 
-export function isTextModel(id, meta) {
+// isTextModel is whether a vendor's model chats: not deprecated, answering
+// in text, and not matched by NOT_TEXT or the vendor's list.skip.
+export function isTextModel(id, meta, vendor) {
+  if (vendor?.list?.skip?.test(id)) return false
   if (meta?.status === "deprecated") return false
   const output = meta?.modalities?.output
   if (Array.isArray(output) && !output.includes("text")) return false
@@ -179,7 +185,7 @@ export async function listModels({ account, directory, fetchImpl = fetch, log = 
     const entries = lives[i] ?? Object.values(metas).map((m) => ({ id: m.id, name: m.name }))
     for (const entry of entries) {
       const meta = metas[entry.id]
-      if (!isTextModel(entry.id, meta)) continue
+      if (!isTextModel(entry.id, meta, vendor)) continue
       const model = buildModel(vendor, entry, meta, account.mode)
       models[model.id] = model
     }
