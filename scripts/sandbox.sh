@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Integration check: runs magpie with a throwaway HOME, this folder as its
-# plugin and an account seeded from .env.local, then tests each model given.
+# plugin and an account seeded from .env.local, prints a redacted summary of
+# the model list, then tests each model given.
 # Usage: scripts/sandbox.sh <native|rest> <model key>...
 set -euo pipefail
 mode=${1:?usage: scripts/sandbox.sh <native|rest> <model key>...}
@@ -25,9 +26,11 @@ mkdir -p "$sb/.config/magpie"
 chmod 600 "$sb/.config/magpie/plugin-auth.json"
 
 m plugin add "$root" </dev/null
-m plugin --json >"$root/.sandbox-plugin.json"
-echo "plugin listing saved to .sandbox-plugin.json"
+# The raw listing names the account and holds the token's last characters,
+# so it stays in the sandbox (removed on exit); only a summary is printed.
+m plugin --json >"$sb/plugin.json"
 status=0
+bun "$root/scripts/listing.mjs" "$sb/plugin.json" || status=1
 for model in "$@"; do
   m provider test cloudflare-ai-gateway "$model" || { echo "FAILED: $model"; status=1; }
 done

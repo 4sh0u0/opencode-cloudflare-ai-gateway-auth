@@ -245,7 +245,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 
 ### 8.3 集成测试
 
-沙箱运行 magpie（`HOME`、`XDG_*` 指向临时目录，`MAGPIE_ADDR=127.0.0.1:3499`）：从 `.env.local` 直接写入沙箱的 `plugin-auth.json`（`plugin login` 是交互式的，且会让 token 经过终端；登录流程由 `authorize` 单元测试和 8.5 人工验收覆盖），然后 `plugin add ./`、`plugin --json`、对每个厂商两种模式各跑 `provider test`。
+沙箱运行 magpie（`HOME`、`XDG_*` 指向临时目录，`MAGPIE_ADDR=127.0.0.1:3499`）：从 `.env.local` 直接写入沙箱的 `plugin-auth.json`（`plugin login` 是交互式的，且会让 token 经过终端；登录流程由 `authorize` 单元测试和 8.5 人工验收覆盖），然后 `plugin add ./`、`plugin --json`、对每个厂商两种模式各跑 `provider test`。`plugin --json` 的原始输出含账号名（网关、账号 ID 前 8 位）与 magpie 的 `accounts[].hint`（token 末 4 位），只写在沙箱临时目录（退出即删），终端只打印 `scripts/listing.mjs` 生成的摘要：各厂商前缀的模型数与 npm 包集合。
 
 ### 8.4 BYOK 生效验证
 
