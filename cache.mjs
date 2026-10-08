@@ -41,6 +41,7 @@ export async function cached(name, { directory, now = Date.now, ok, refresh }) {
   }
   try {
     const data = await refresh()
+    if (!ok(data)) throw new Error(`${name} came back in a shape that is not usable`)
     if (file) {
       try {
         await mkdir(folder, { recursive: true })
