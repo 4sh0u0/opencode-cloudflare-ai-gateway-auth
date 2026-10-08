@@ -2,3 +2,4 @@
 node_modules/
 probe-report.json
 .sandbox-plugin.json
+HANDOFF.md
