@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto"
 import { cached, resetCacheFailures } from "./cache.mjs"
 import { byokSlugs, tokenRefused } from "./cf.mjs"
+import { loadCfCatalog } from "./cfcatalog.mjs"
 import { NO_STORED_KEY, errorCodes } from "./errors.mjs"
 import { GATEWAY, PLACEHOLDER } from "./route.mjs"
-import { NPM, PROVIDER, VENDORS, protocolFor } from "./vendors.mjs"
+import { NPM, PROVIDER, VENDORS, protocolFor, splitModel } from "./vendors.mjs"
 
 export { CACHE_TTL, CATALOG_RETRY } from "./cache.mjs"
 export const MODELS_DEV = "https://models.dev/api.json"
@@ -72,13 +73,20 @@ export function isTextModel(id, meta, vendor) {
 
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
 
-// catalogOk is whether data has the shape loadCatalog keeps: every vendor's
-// catalog with an object of models.
-const catalogOk = (data) => isObject(data) && VENDORS.every((v) => isObject(data[v.catalog]?.models))
+// models.dev's provider for AI Gateway: Cloudflare's catalog, keyed by REST
+// id ("anthropic/claude-sonnet-5.5")
+const AI_GATEWAY = "cloudflare-ai-gateway"
+// the models.dev providers loadCatalog keeps
+const KEPT = [...VENDORS.map((v) => v.catalog), AI_GATEWAY]
 
-// loadCatalog is the vendors' models.dev catalogs, kept for CACHE_TTL in
-// magpie's config folder; a stale copy serves while models.dev is down.
-// After a failed refresh it doesn't ask models.dev again for CATALOG_RETRY.
+// catalogOk is whether data has the shape loadCatalog keeps: every kept
+// catalog with an object of models.
+const catalogOk = (data) => isObject(data) && KEPT.every((c) => isObject(data[c]?.models))
+
+// loadCatalog is the vendors' models.dev catalogs and AI Gateway's, kept for
+// CACHE_TTL in magpie's config folder; a stale copy serves while models.dev
+// is down. After a failed refresh it doesn't ask models.dev again for
+// CATALOG_RETRY.
 export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now } = {}) {
   return cached("models-dev.json", {
     directory,
@@ -89,9 +97,9 @@ export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now
       if (!res.ok) throw new Error(`models.dev answered ${res.status}`)
       const all = await res.json()
       return Object.fromEntries(
-        VENDORS.map((v) => {
-          const models = all?.[v.catalog]?.models
-          return [v.catalog, { models: isObject(models) ? models : {} }]
+        KEPT.map((c) => {
+          const models = all?.[c]?.models
+          return [c, { models: isObject(models) ? models : {} }]
         }),
       )
     },
@@ -119,6 +127,20 @@ export function metaFor(metas, id) {
   if (Object.hasOwn(metas, id)) return metas[id]
   const base = id.replace(DATED, "")
   return base !== id && Object.hasOwn(metas, base) ? { ...metas[base], name: undefined } : undefined
+}
+
+// restMetaFor is the models.dev metadata of a catalog id REST mode lists:
+// AI Gateway's entry for it, or else the vendor's own by the id, by the id
+// with dots as dashes (Anthropic's claude-sonnet-5.5 is claude-sonnet-5-5),
+// or by a dated snapshot's base (metaFor).
+export function restMetaFor(catalog, vendor, id) {
+  const gateway = catalog?.[AI_GATEWAY]?.models ?? {}
+  const rest = `${vendor.restPrefix}/${id}`
+  if (Object.hasOwn(gateway, rest)) return gateway[rest]
+  const metas = catalog?.[vendor.catalog]?.models ?? {}
+  const dashed = id.replaceAll(".", "-")
+  for (const own of [id, dashed]) if (Object.hasOwn(metas, own)) return metas[own]
+  return metaFor(metas, id) ?? metaFor(metas, dashed)
 }
 
 // buildModel is the OpenCode Model magpie lists for one vendor model: each
@@ -215,10 +237,41 @@ export async function listModels(options) {
   return structuredClone(models)
 }
 
+// restModels is a REST account's list. REST takes only the ids in
+// Cloudflare's model catalog (spec 11.6), so each vendor's catalog models are
+// its list, and no vendor is asked for its own. models.dev's
+// cloudflare-ai-gateway models stand in while the catalog can't be read.
+async function restModels(vendors, catalogLoad, { directory, fetchImpl, log }) {
+  const [catalog, read] = await Promise.all([
+    catalogLoad,
+    loadCfCatalog({ directory, fetchImpl }).catch((e) => {
+      log("warn", `Cloudflare's model catalog is unavailable (${e.message}); using models.dev's ${AI_GATEWAY} models`)
+      return null
+    }),
+  ])
+  const entries =
+    read ??
+    Object.keys(catalog?.[AI_GATEWAY]?.models ?? {})
+      .map(splitModel)
+      .filter(Boolean)
+      .map((k) => ({ author: k.prefix, id: k.nativeId }))
+  const models = {}
+  for (const vendor of vendors)
+    for (const { author, id } of entries) {
+      if (author !== vendor.restPrefix) continue
+      const meta = restMetaFor(catalog, vendor, id)
+      if (!isTextModel(id, meta, vendor)) continue
+      const model = buildModel(vendor, { id }, meta, "rest")
+      models[model.id] = model
+    }
+  return models
+}
+
 // collectModels makes the account's list: the vendors its gateway holds keys
-// for, each listed live or else from models.dev. settings are the plugin's
-// options ({allowUnifiedBilling}); without them lists never fall back to
-// Unified Billing.
+// for, each listed live or else from models.dev, or in REST mode from
+// Cloudflare's catalog (restModels). settings are the plugin's options
+// ({allowUnifiedBilling}); without them lists never fall back to Unified
+// Billing.
 async function collectModels({ account, directory, fetchImpl = fetch, log = () => {}, settings = {} }) {
   let slugs = null
   try {
@@ -235,11 +288,13 @@ async function collectModels({ account, directory, fetchImpl = fetch, log = () =
   }
   // a vendor the account's mode can't reach (rest: null after the probe) is left out
   const vendors = VENDORS.filter((v) => (!slugs || slugs.has(v.slug)) && protocolFor(v, account.mode))
+  const catalogLoad = loadCatalog({ directory, fetchImpl }).catch((e) => {
+    log("warn", `models.dev is unavailable: ${e.message}`)
+    return null
+  })
+  if (account.mode === "rest") return restModels(vendors, catalogLoad, { directory, fetchImpl, log })
   const [catalog, ...lives] = await Promise.all([
-    loadCatalog({ directory, fetchImpl }).catch((e) => {
-      log("warn", `models.dev is unavailable: ${e.message}`)
-      return null
-    }),
+    catalogLoad,
     ...vendors.map((v) =>
       liveList(v, account, { fetchImpl, settings }).catch((e) => {
         // no key, nothing to call: an empty list leaves the vendor out

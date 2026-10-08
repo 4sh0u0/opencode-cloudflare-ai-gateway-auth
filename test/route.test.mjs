@@ -125,6 +125,13 @@ describe("REST mode", () => {
     expect(r.init.headers.get("authorization")).toBe("Bearer tok")
   })
 
+  test("a catalog id with a dot, as REST mode lists it, goes out as it is", () => {
+    const [url, init] = request("/messages", { model: "anthropic/claude-sonnet-5.5", max_tokens: 8 })
+    const r = route(url, init, REST)
+    expect(r.url).toBe(`${API}/accounts/${ACCT}/ai/v1/messages`)
+    expect(JSON.parse(r.init.body)).toEqual({ model: "anthropic/claude-sonnet-5.5", max_tokens: 8 })
+  })
+
   test("Google, DeepSeek and xAI are refused in the chat shape, pointing to the native mode", () => {
     for (const model of ["google/gemini-x", "deepseek/deepseek-x", "xai/grok-9"]) {
       const [url, init] = request("/chat/completions", { model, messages: [] })

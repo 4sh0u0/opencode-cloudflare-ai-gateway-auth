@@ -15,9 +15,21 @@ import {
   metaFor,
   parseList,
   resetModelCache,
+  restMetaFor,
 } from "../models.mjs"
+import { CF_CATALOG } from "../cfcatalog.mjs"
+import { GATEWAY, PLACEHOLDER } from "../route.mjs"
 import { NPM, vendorByPrefix } from "../vendors.mjs"
 import { fakeFetch, json } from "./fetch.mjs"
+
+// A hand-written page in the shape of Cloudflare's model catalog: OpenAI
+// gpt-4.1-nano and gpt-5.5, Anthropic claude-haiku-4.5, claude-sonnet-5.5 and
+// claude-sonnet-5, Google gemini-x, and entries that aren't Text Generation.
+const CF_PAGE = await readFile(new URL("./cf-catalog.md", import.meta.url), "utf8")
+const cfPage = (text = CF_PAGE, status = 200) => [CF_CATALOG, new Response(text, { status })]
+// one catalog entry, in the page's shape
+const cfEntry = (author, id, task = "Text Generation") =>
+  `[![Logo](https://developers.cloudflare.com/_astro/x.svg)<h3>${id}</h3>\n\n${author}${task} A model.](https://developers.cloudflare.com/ai/models/${author}/${id}/)\n\nCompare\n\n`
 
 const ACCOUNT = {
   token: "tok",
@@ -239,11 +251,45 @@ describe("metaFor", () => {
   })
 })
 
+describe("restMetaFor", () => {
+  const anthropic = vendorByPrefix("anthropic")
+  const id = "claude-x.1-20260101"
+  const gateway = { name: "AI Gateway's" }
+  const exact = { name: "exact" }
+  const dashed = { name: "dashed" }
+  const base = { name: "base", limit: { context: 200000, output: 64000 } }
+  const catalog = (gw, native) => ({ "cloudflare-ai-gateway": { models: gw }, anthropic: { models: native } })
+
+  test("takes models.dev's cloudflare-ai-gateway entry, then the vendor's by id, with dots as dashes, then the dated base", () => {
+    const native = { [id]: exact, "claude-x-1-20260101": dashed, "claude-x-1": base }
+    expect(restMetaFor(catalog({ [`anthropic/${id}`]: gateway }, native), anthropic, id)).toBe(gateway)
+    expect(restMetaFor(catalog({}, native), anthropic, id)).toBe(exact)
+    const { [id]: _, ...withoutExact } = native
+    expect(restMetaFor(catalog({}, withoutExact), anthropic, id)).toBe(dashed)
+    const meta = restMetaFor(catalog({}, { "claude-x-1": base }), anthropic, id)
+    expect(meta.limit).toEqual(base.limit)
+    expect(meta.name).toBeUndefined()
+  })
+
+  test("finds the dated base of an id with dots, as OpenAI writes them", () => {
+    const openai = vendorByPrefix("openai")
+    const meta = restMetaFor({ openai: { models: { "gpt-4.1": base } } }, openai, "gpt-4.1-2025-04-14")
+    expect(meta.limit).toEqual(base.limit)
+  })
+
+  test("finds nothing without a catalog", () => {
+    expect(restMetaFor(null, anthropic, "claude-x")).toBeUndefined()
+    expect(restMetaFor({}, anthropic, "constructor")).toBeUndefined()
+  })
+})
+
 describe("loadCatalog", () => {
-  test("fetches models.dev once and keeps only the vendors' catalogs", async () => {
-    const f = fakeFetch([["models.dev", json({ ...CATALOG, mistral: { models: { m: {} } } })]])
+  test("fetches models.dev once and keeps only the vendors' catalogs and cloudflare-ai-gateway", async () => {
+    const gateway = { models: { "anthropic/claude-sonnet-5.5": { name: "Claude Sonnet 5.5" } } }
+    const f = fakeFetch([["models.dev", json({ ...CATALOG, mistral: { models: { m: {} } }, "cloudflare-ai-gateway": gateway })]])
     const first = await loadCatalog({ directory: dir, fetchImpl: f, now: () => 1000 })
-    expect(Object.keys(first).sort()).toEqual(["anthropic", "deepseek", "google", "openai", "xai"])
+    expect(Object.keys(first).sort()).toEqual(["anthropic", "cloudflare-ai-gateway", "deepseek", "google", "openai", "xai"])
+    expect(first["cloudflare-ai-gateway"]).toEqual(gateway)
     const second = await loadCatalog({ directory: dir, fetchImpl: f, now: () => 1000 + CACHE_TTL - 1 })
     expect(second).toEqual(first)
     expect(f.calls.length).toBe(1)
@@ -273,6 +319,8 @@ describe("loadCatalog", () => {
       JSON.stringify({ fetchedAt: 0, data: null }),
       JSON.stringify({ fetchedAt: 0, data: [] }),
       JSON.stringify({ fetchedAt: 0, data: { ...CATALOG, openai: { models: "x" } } }),
+      // an older copy, kept before cloudflare-ai-gateway was
+      JSON.stringify({ fetchedAt: 0, data: CATALOG }),
     ]
     for (const text of corrupt) {
       resetModelCache()
@@ -474,19 +522,97 @@ describe("listModels", () => {
     expect(Object.keys(models)).toEqual(["xai/grok-9"])
   })
 
-  test("REST mode lists only the vendors the REST API serves with the gateway's keys", async () => {
-    const f = fakeFetch([
-      configs([row("openai"), row("anthropic"), row("google-ai-studio"), row("deepseek"), row("grok")]),
-      ["/openai/models", json({ data: [{ id: "gpt-x" }] })],
-      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
-      ["/google-ai-studio/", json({ models: [{ name: "models/gemini-x", supportedGenerationMethods: ["generateContent"] }] })],
-      ["/deepseek/models", json({ data: [{ id: "deepseek-x" }] })],
-      ["/grok/v1/models", json({ data: [{ id: "grok-9" }] })],
-      ["models.dev", json(CATALOG)],
-    ])
-    const models = await listModels({ account: { ...ACCOUNT, mode: "rest" }, directory: dir, fetchImpl: f })
-    expect(Object.keys(models).sort()).toEqual(["anthropic/claude-x", "openai/gpt-x"])
-    expect(f.calls.some((c) => /\/(?:google-ai-studio|deepseek|grok)\//.test(c.url))).toBe(false)
+  // REST takes only Cloudflare's catalog ids (spec 11.6), so they are its list
+  describe("in REST mode", () => {
+    const REST = { ...ACCOUNT, mode: "rest" }
+    const everyKey = () => configs([row("openai"), row("anthropic"), row("google-ai-studio"), row("deepseek"), row("grok")])
+    const CATALOG_IDS = [
+      "anthropic/claude-haiku-4.5",
+      "anthropic/claude-sonnet-5",
+      "anthropic/claude-sonnet-5.5",
+      "openai/gpt-4.1-nano",
+      "openai/gpt-5.5",
+    ]
+
+    test("lists the catalog's OpenAI and Anthropic ids, and asks no vendor for its list", async () => {
+      const f = fakeFetch([everyKey(), cfPage(), ["models.dev", json(CATALOG)]])
+      const models = await listModels({ account: REST, directory: dir, fetchImpl: f })
+      expect(Object.keys(models).sort()).toEqual(CATALOG_IDS)
+      expect(models["anthropic/claude-sonnet-5.5"].api).toEqual({ id: "anthropic/claude-sonnet-5.5", url: PLACEHOLDER, npm: NPM.messages })
+      expect(models["openai/gpt-5.5"].api).toEqual({ id: "openai/gpt-5.5", url: PLACEHOLDER, npm: NPM.responses })
+      expect(f.calls.some((c) => c.url.startsWith(GATEWAY))).toBe(false)
+      expect(f.calls.map((c) => new URL(c.url).host).sort()).toEqual(["api.cloudflare.com", "developers.cloudflare.com", "models.dev"])
+    })
+
+    test("lists only the vendors whose default key the gateway holds", async () => {
+      const f = fakeFetch([configs([row("anthropic"), row("openai", "team")]), cfPage(), ["models.dev", json(CATALOG)]])
+      const models = await listModels({ account: REST, directory: dir, fetchImpl: f })
+      expect(Object.keys(models).sort()).toEqual(CATALOG_IDS.filter((k) => k.startsWith("anthropic/")))
+    })
+
+    test("still leaves out what isTextModel and the vendor's list.skip drop", async () => {
+      const catalog = { ...CATALOG, openai: { models: { "o-old": { name: "O Old", status: "deprecated" } } } }
+      const page = ["gpt-x", "gpt-x-search-preview", "gpt-x-realtime", "o-old"].map((id) => cfEntry("openai", id)).join("")
+      const f = fakeFetch([everyKey(), cfPage(page), ["models.dev", json(catalog)]])
+      expect(Object.keys(await listModels({ account: REST, directory: dir, fetchImpl: f }))).toEqual(["openai/gpt-x"])
+    })
+
+    test("takes models.dev's cloudflare-ai-gateway entry first, then the vendor's by id, then with dots as dashes", async () => {
+      const catalog = {
+        ...CATALOG,
+        "cloudflare-ai-gateway": {
+          models: { "anthropic/claude-sonnet-5.5": { name: "Claude Sonnet 5.5 (gateway)", limit: { context: 1000000, output: 128000 } } },
+        },
+        anthropic: {
+          models: {
+            "claude-sonnet-5-5": { name: "Claude Sonnet 5.5 (anthropic)" },
+            "claude-haiku-4-5": { name: "Claude Haiku 4.5", limit: { context: 200000, output: 64000 }, cost: { input: 1, output: 5 } },
+          },
+        },
+        openai: { models: { "gpt-4.1-nano": { name: "GPT-4.1 nano" }, "gpt-4-1-nano": { name: "not this one" } } },
+      }
+      const f = fakeFetch([everyKey(), cfPage(), ["models.dev", json(catalog)]])
+      const models = await listModels({ account: REST, directory: dir, fetchImpl: f })
+      expect(models["anthropic/claude-sonnet-5.5"].name).toBe("Claude Sonnet 5.5 (gateway)")
+      expect(models["anthropic/claude-sonnet-5.5"].limit).toEqual({ context: 1000000, output: 128000 })
+      expect(models["openai/gpt-4.1-nano"].name).toBe("GPT-4.1 nano")
+      expect(models["anthropic/claude-haiku-4.5"].name).toBe("Claude Haiku 4.5")
+      expect(models["anthropic/claude-haiku-4.5"].limit).toEqual({ context: 200000, output: 64000 })
+      expect(models["anthropic/claude-haiku-4.5"].cost.input).toBe(1)
+      // found nowhere: the defaults
+      expect(models["anthropic/claude-sonnet-5"].name).toBe("claude-sonnet-5")
+      expect(models["anthropic/claude-sonnet-5"].limit).toEqual(DEFAULT_LIMIT)
+    })
+
+    test("falls back to models.dev's cloudflare-ai-gateway models, with a warn, when the catalog page fails or lists none", async () => {
+      const catalog = {
+        ...CATALOG,
+        "cloudflare-ai-gateway": {
+          models: {
+            "anthropic/claude-sonnet-5.5": { name: "Claude Sonnet 5.5" },
+            "openai/gpt-5.5": { name: "GPT-5.5" },
+            "google/gemini-x": { name: "Gemini X" },
+            "workers-ai/@cf/meta/llama-x": { name: "Llama X" },
+          },
+        },
+      }
+      for (const page of [cfPage("", 503), cfPage("# Models\n\nNo models found"), cfPage(cfEntry("openai", "tts-1", "Text-to-Speech"))]) {
+        resetModelCache()
+        const logs = []
+        const f = fakeFetch([everyKey(), page, ["models.dev", json(catalog)]])
+        const models = await listModels({ account: REST, directory: dir, fetchImpl: f, log: (level, message) => logs.push([level, message]) })
+        expect(Object.keys(models).sort()).toEqual(["anthropic/claude-sonnet-5.5", "openai/gpt-5.5"])
+        expect(models["openai/gpt-5.5"].name).toBe("GPT-5.5")
+        expect(logs.some(([level, message]) => level === "warn" && message.includes("cloudflare-ai-gateway"))).toBe(true)
+      }
+    })
+
+    test("doesn't warn of a fallback while the catalog page answers", async () => {
+      const logs = []
+      const f = fakeFetch([everyKey(), cfPage(), ["models.dev", json(CATALOG)]])
+      await listModels({ account: REST, directory: dir, fetchImpl: f, log: (level, message) => logs.push([level, message]) })
+      expect(logs).toEqual([])
+    })
   })
 
   test("a gateway with no keys lists nothing", async () => {
@@ -547,6 +673,23 @@ describe("listModels memo", () => {
     await listModels({ account: { ...ACCOUNT, mode: "rest" }, directory: dir, fetchImpl: f })
     await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, settings: { allowUnifiedBilling: true } })
     expect(rounds(f)).toBe(5)
+  })
+
+  test("a REST and a native listing of the same gateway are kept apart", async () => {
+    const f = fakeFetch([
+      ["/provider_configs", json({ success: true, result: [{ provider_slug: "anthropic", alias: "default" }] })],
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+      cfPage(),
+      ["models.dev", json(CATALOG)],
+    ])
+    const rest = { ...ACCOUNT, mode: "rest" }
+    const native = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })
+    const listed = await listModels({ account: rest, directory: dir, fetchImpl: f })
+    expect(Object.keys(native)).toEqual(["anthropic/claude-x"])
+    expect(Object.keys(listed).sort()).toEqual(["anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-5", "anthropic/claude-sonnet-5.5"])
+    expect(await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f })).toEqual(native)
+    expect(await listModels({ account: rest, directory: dir, fetchImpl: f })).toEqual(listed)
+    expect(rounds(f)).toBe(2)
   })
 
   test("a failure is not kept", async () => {
