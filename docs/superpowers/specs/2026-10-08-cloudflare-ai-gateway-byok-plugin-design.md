@@ -262,3 +262,45 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 | 厂商列表接口不经网关透传（V2） | 列表依赖 models.dev，新模型滞后 | 回退路径已是一等公民；用户仍可手动在 magpie 中补模型 |
 | models.dev 下线或格式变化 | 元数据缺失 | 本地缓存 + 默认元数据 |
 | 误走统一计费 | 意外扣费 | 默认 `cf-aig-no-wholesale: true`；README 建议网关开启 `byok_only` |
+
+## 11. 实测记录（2026-10-08）
+
+### 11.1 条件
+
+- 脚本：`scripts/probe.mjs`（8.1 原写 `probe.sh`，实际为 Bun 脚本），运行 `PROBE_V5=1 bun --env-file=.env.local scripts/probe.mjs`，结果写入 `probe-report.json`（已 gitignore，token 已脱敏）。
+- Token 权限：Account › AI Gateway › Run + Read，**没有** Workers AI 权限。
+- 网关：开启认证；`provider_configs` 在 `default` 别名下有 `openai`、`anthropic`、`google-ai-studio`、`deepseek`、`grok` 的 key（另有 4 个本插件不支持的 slug）。条目带 `provider_slug` 与 `alias` 字段，与 `cf.mjs` 的读取方式一致。
+- 共运行两次。第 1 次脚本为 xAI 自动选中了视频模型 `grok-imagine-video-…-lite`（`lite` 命中 CHEAP，SKIP 不含 `imagine` / `video`），`V1.xai.chat` 30 秒超时，原因在脚本选模型，与 Cloudflare 无关。第 2 次用脚本自带的 `PROBE_MODEL_XAI` 指定文本模型重跑；除这一项外，两次各键的状态码与模型数完全一致。下表以第 2 次为准。
+- 第 2 次各厂商所用模型：OpenAI `chat-latest`、Anthropic `claude-haiku-5-5`、Google `gemini-2.5-flash`、DeepSeek `deepseek-flash`、xAI `grok-4.20-0309-non-reasoning`。
+- 补充检查（零成本，临时脚本，未提交）：用随机生成、格式正确但不存在的 40 字符 token 分别请求原生入口、REST、CF API，确认「格式正确的无效 token」的拒绝方式；token 无效时请求在鉴权阶段即被拒，不产生推理。
+
+### 11.2 结论
+
+| 编号 | 结论 | 状态码 / 证据 | 采用的处理 |
+|---|---|---|---|
+| V1 | 成立（各厂商默认协议） | OpenAI `/responses`、Anthropic `/v1/messages`、Google `:generateContent`、DeepSeek `/chat/completions`、xAI `/v1/chat/completions` 均 200。请求不带厂商认证头且带 `cf-aig-no-wholesale: true`，无托管 key 时会 400（见 V5），所以 200 即使用了托管 key | `VENDORS.native` 不变。非默认原生路径（OpenAI / Anthropic / Google 的 chat，xAI 的 responses）未实测 |
+| V2 | 成立 | 5 家 `…models` 均 200，可解析模型数：OpenAI 139、Anthropic 14、Google（含 `generateContent`）45、DeepSeek 2、xAI 14 | `list` 不变 |
+| V3 | 未能实测 | 7 个 REST 请求（含 Google 的 `google-ai-studio/`、`google/` 与 xAI 的 `xai/`、`grok/` 两组前缀）全部 401，`errors[0].code` 10000：token 缺 Workers AI 权限（V4），请求在模型路由前即被拒 | 按官方 REST 文档「Model naming」（https://developers.cloudflare.com/ai-gateway/usage/rest-api/#model-naming）：Google 前缀 `google`、xAI 前缀 `xai`。Google 的 `restPrefix` 由 `google-ai-studio` 改为 `google`，xAI 保持 `xai`。**待用带 Workers AI Read 的 token 重跑 V3 确认**（包括 REST 的 `google/` 是否使用 `google-ai-studio` 托管 key） |
+| V4 | 成立（需要） | 仅有 AI Gateway 权限的 token 调 `/ai/v1/*` 全部 401 / 10000。官方文档同一页「Authentication」：所有 `/accounts/{id}/ai/*` 端点需要 Account › Workers AI › Read，只有 AI Gateway 权限的 token 返回 401 / 10000 | README「Token permissions」：模式 B 另需 Account › Workers AI › Read；缺少时每个推理请求 401 / 10000，与 token 无效无法区分，插件标为 `expired` |
+| V5 | 原生入口成立；REST 未能实测 | 原生入口 → 无托管 key 的 `default` 网关：400，`error[0].code` 2044（"Customer-provided provider credentials are required for this request"）。REST → 401 / 10000（同 V4） | 原生入口无需改动。README 写明模式 B 依赖网关开启 `byok_only`（控制台 Require provider credentials） |
+| V6 | 成立 | `stream: true` + `tools` + `anthropic-beta` → 200，`text/event-stream`，首个事件 `message_start` | 无需在 `route()` 中补头 |
+| V7 | 成立 | `:streamGenerateContent?alt=sse` → 200，`text/event-stream` | Google 原生默认协议保持 Gemini |
+| V8 | — | magpie 侧，Task 7 验证 | — |
+| V9 | 原生入口、REST 与预期一致；CF API 对格式错误的 token 返回 400 | 见 11.3 | `GATEWAY_AUTH_CODES = {2009}`；`API_AUTH_CODES = {10000}`（去掉未观察到的 9109）；`errorCodes` 读 `error` / `errors` 数组，与实测形状一致，不改；`listModels` 把 CF API 的 400 / 9106 也视为 token 被拒（`signIn: "expired"`） |
+
+### 11.3 V9：Cloudflare 拒绝的形状
+
+| 入口 | 情况 | 状态 | 响应体字段 | `code` |
+|---|---|---|---|---|
+| 原生入口 | token 格式错误，或格式正确但不存在 | 401 | `success: false`、`result: []`、`messages: []`、`error: [{code, message}]`、`name: "AiGatewayError"`、`httpCode`、`internalCode`、`message`、`description` | 2009（`internalCode` 同值） |
+| 原生入口 | 无托管 key 且带 `cf-aig-no-wholesale: true` | 400 | 同上 | 2044 |
+| REST | token 格式错误、格式正确但不存在、缺 Workers AI 权限 | 401 | `result: null`、`success: false`、`errors: [{code, message}]`、`messages: []` | 10000 |
+| CF API（`provider_configs`） | token 格式正确但不存在 | 401 | 同 REST | 10000 |
+| CF API（`provider_configs`） | token 格式错误，或无认证头 | 400 | 同 REST | 9106 |
+
+未实测：CF API 在 token 缺 AI Gateway Read 时的状态码与错误码（没有这样的 token）。若与 REST 一样返回 401 / 10000，`listModels` 会标 `expired`，而不是第 6 节第 1 步设想的「403 → 按 5 家全部处理」。
+
+### 11.4 其他发现
+
+- 官方文档（统一计费「Credential precedence」与 BYOK「Key aliases」）：REST `/ai/v1/*` 属统一计费端点，只认 `default` 别名的托管 key，`cf-aig-byok-alias` 只对原生入口生效；`default` 下没有 key 时回落统一计费（`cf-aig-no-wholesale` / `byok_only` 可阻止）。与 4.1「`alias` 仅 `mode == native` 时询问」一致，README 需说明。
+- xAI 实时列表含非文本模型 `grok-imagine-*`（含视频生成），其 id 不含第 6 节第 5 步的过滤词；若 models.dev 未标注其输出不含 `text`，会被列出。留给 Task 5 / 最终评审处理。
