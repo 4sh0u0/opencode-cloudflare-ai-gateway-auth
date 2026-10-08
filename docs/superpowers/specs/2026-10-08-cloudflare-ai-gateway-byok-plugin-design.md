@@ -59,7 +59,7 @@
 | `vendors.mjs` | 厂商映射表（纯数据 + 查询函数） | 无 |
 | `route.mjs` | `route(input, init, account, options)` → `{url, init}`，纯函数，负责 URL、请求头、请求体改写 | `vendors.mjs` |
 | `models.mjs` | 厂商发现、实时列表、models.dev 回退、元数据合并、过滤 | `vendors.mjs`、`cf.mjs` |
-| `cf.mjs` | Cloudflare API 小客户端：读网关、读 `provider_configs`，统一错误分类 | 无 |
+| `cf.mjs` | Cloudflare API 小客户端：读 `provider_configs`，统一错误分类 | `route.mjs`（只取 API 常量） |
 | `errors.mjs` | 上游错误 → `X-Magpie-Sign-In` 判定；按协议格式构造本地错误响应 | 无 |
 | `test/*.test.mjs` | `bun test` 单元测试，fetch 全部模拟 | 被测模块 |
 
@@ -91,19 +91,18 @@ agent ──(任意协议)──> magpie 网关 ──(翻译成模型声明的�
 | key | 类型 | 说明 | 校验 |
 |---|---|---|---|
 | `account` | text | Cloudflare Account ID | `/^[0-9a-f]{32}$/` |
-| `gateway` | text | Gateway ID，示例 `my-gateway` | 非空，`/^[a-z0-9-_]{1,64}$/i` |
+| `gateway` | text | Gateway ID，示例 `my-gateway` | 不超过 64 字符，且符合 Cloudflare OpenAPI 中的网关 ID 规则 `/^[a-z0-9_]+(?:-[a-z0-9_]+)*$/` |
 | `mode` | select | `native`（原生入口，推荐）/ `rest`（REST API） | — |
 | `alias` | text | BYOK key 别名，留空即 `default`；仅 `mode == native` 时询问 | 可空 |
 
 ### 4.2 `authorize(inputs)`
 
-1. `GET /accounts/{account}/ai-gateway/gateways/{gateway}`（`Authorization: Bearer <token>`）。
-2. 结果：
-   - 200 → 返回 `{type: "success", key: token, metadata: {account, gateway, mode, alias, byokOnly, accountId: "<gateway> · <account 前 8 位>"}}`；
-   - 401/403 → `failed`：「Token 无效或缺少 AI Gateway Read 权限」；
-   - 404 → `failed`：「账号下没有名为 <gateway> 的网关」；
-   - 其他 → `failed`，附状态码与 CF 错误信息（截断到 500 字）。
-3. 多网关 / 多账号 = 多次登录；magpie 自动对它们做故障切换。
+magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plugin/host.js` 的 `apiKey()` 只调用 `m.authorize(inputs)`，key 由宿主自己保存），所以登录时无法用 token 调 CF API。`authorize` 只做：
+
+1. 再次校验并规范化 `account`（trim、转小写）、`gateway`（trim）、`mode`（缺省 `native`）、`alias`（trim，`default` 视为空）；不合法返回 `{type: "failed", error}`。
+2. 返回 `{type: "success", metadata: {account, gateway, mode, alias, email: "<gateway> · <account 前 8 位>"}}`，不返回 `key`（宿主用用户填写的 key 保存）。`email` 只用于账号显示名：magpie 按 `accountId` → `metadata.email` → `email` 取名，而 api 账号只保存 `metadata`。
+3. token 有效性在第一次 `provider.models` 时验证（见第 6 节第 1 步）：CF API 返回 401 → 抛出带 `signIn: "expired"` 的错误，账号显示需要重新登录并附原因。
+4. 多网关 / 多账号 = 多次登录；magpie 自动对它们做故障切换。
 
 ### 4.3 Token 权限
 
@@ -159,9 +158,9 @@ agent ──(任意协议)──> magpie 网关 ──(翻译成模型声明的�
 
 对每个账号：
 
-1. **厂商发现**：`GET /accounts/{account}/ai-gateway/gateways/{gateway}/provider_configs`，取别名与账号 `alias`（默认 `default`）匹配的条目的厂商标识，与映射表的 5 家取交集。
-   - 401/403：在日志提示缺少 AI Gateway Read，按 5 家全部处理；
-   - 其他失败：同上。
+1. **厂商发现**：`GET /accounts/{account}/ai-gateway/gateways/{gateway}/provider_configs`（分页 `page`/`per_page`），取 `alias` 与账号别名（空即 `default`）匹配的条目的 `provider_slug`，与映射表的 5 家取交集。
+   - 401：token 无效 → 抛出带 `signIn: "expired"` 的错误；
+   - 403（缺少 AI Gateway Read）或其他失败：日志提示，按 5 家全部处理。
 2. **实时列表**（各厂商并行，每个 8 秒超时；无论账号是模式 A 还是 B，列表都经原生入口获取，因为 REST API 没有列表端点）：`GET {gw}/{slug}{实时列表路径}`，头同 5.3（无请求体），解析：
    - OpenAI / DeepSeek / xAI：`{data: [{id}]}`
    - Anthropic：`{data: [{id, display_name}]}`
@@ -172,8 +171,8 @@ agent ──(任意协议)──> magpie 网关 ──(翻译成模型声明的�
    - 去掉 `status: "deprecated"`；
    - ID 含 `embed`、`-tts`、`image`、`audio`、`-live`、`realtime`、`moderation`、`whisper`、`dall-e`、`sora`、`transcribe`、`computer-use`、`deep-research` 的（参照 magpie `textModel`）；
    - models.dev 标明输出不含 `text` 的。
-6. **输出**：键为模型键（`前缀/原生ID`），`api: {id: 模型键, url: 占位地址, npm: 按账号模式与 5.2 选择}`。
-7. **全部失败**：返回 `provider.models` 原值（magpie 保留旧列表）；CF API 鉴权失败（401）时抛出带 `signIn: "expired"` 的错误。
+6. **输出**：键为模型键（`前缀/原生ID`），`api: {id: 模型键, url: 占位地址, npm: 按账号模式与 5.2 选择}`。单个厂商实时列表失败、改用 models.dev 补齐属于正常路径，只写日志，不标记回退。
+7. **最终列表为空**：返回 `provider.models` 的副本并打上 `Symbol.for("magpie.fellBack")`，magpie 保留它原有的列表。
 
 ### 6.1 models.dev 缓存
 
@@ -222,6 +221,7 @@ agent ──(任意协议)──> magpie 网关 ──(翻译成模型声明的�
 | V6 | Anthropic 原生入口仅用 `cf-aig-authorization` + `anthropic-version`，`anthropic-beta`、流式、工具调用是否正常 | 记录差异，必要时在 `route()` 中补头 |
 | V7 | Gemini 原生路径 `…/v1beta/models/<id>:streamGenerateContent?alt=sse` 是否正常 | 改用 `/v1beta/openai/chat/completions`，Google 默认协议改为 Chat |
 | V8 | magpie 侧：占位 `baseURL` 是否被接受；Gemini 路径中带 `/` 的模型 ID 是否被编码 | 调整占位地址或路径解析 |
+| V9 | CF 鉴权错误的状态码与错误码：原生入口 token 无效、REST token 无效、CF API token 无效 / 缺权限 | 更新 `errors.mjs` 与 `cf.mjs` 的判定集合 |
 
 实测结果写入 `vendors.mjs` 并在本文档追加「实测记录」一节。
 
@@ -230,11 +230,12 @@ agent ──(任意协议)──> magpie 网关 ──(翻译成模型声明的�
 - `route()`：5 厂商 × 2 模式 × 各支持协议，断言 URL、删除/新增的头、请求体 `model`；别名、`allowUnifiedBilling` 开关；未知厂商与不支持协议的本地 400。
 - `models.mjs`：各厂商列表解析（固定样本）、models.dev 合并与默认值、过滤规则、部分失败回退、全部失败返回原值、401 抛 `signIn: "expired"`。
 - `errors.mjs`：7.1 表格每一行。
-- `cf.mjs`：`authorize` 各状态码分支。
+- `cf.mjs`：`provider_configs` 分页、别名过滤、401 / 403 / 其他错误的分类。
+- `index.mjs`：`authorize` 的规范化与校验、`config` 钩子、`models` 钩子的空列表回退。
 
 ### 8.3 集成测试
 
-沙箱运行 magpie（`HOME`、`XDG_*` 指向临时目录，`MAGPIE_ADDR=127.0.0.1:3499`）：`plugin add ./`、`plugin login cloudflare-ai-gateway`、`plugin --json`、对每个厂商两种模式各跑 `provider test`。
+沙箱运行 magpie（`HOME`、`XDG_*` 指向临时目录，`MAGPIE_ADDR=127.0.0.1:3499`）：从 `.env.local` 直接写入沙箱的 `plugin-auth.json`（`plugin login` 是交互式的，且会让 token 经过终端；登录流程由 `authorize` 单元测试和 8.5 人工验收覆盖），然后 `plugin add ./`、`plugin --json`、对每个厂商两种模式各跑 `provider test`。
 
 ### 8.4 BYOK 生效验证
 
