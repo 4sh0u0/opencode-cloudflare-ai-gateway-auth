@@ -12,6 +12,7 @@ import {
   listKey,
   listModels,
   loadCatalog,
+  metaFor,
   parseList,
   resetModelCache,
 } from "../models.mjs"
@@ -188,7 +189,14 @@ describe("buildModel", () => {
     expect(m.limit).toEqual({ context: 1000000, output: DEFAULT_LIMIT.output })
     expect(m.capabilities.toolcall).toBe(true)
     expect(m.capabilities.reasoning).toBe(false)
+    expect(m.capabilities.temperature).toBe(false)
     expect(m.variants).toEqual({})
+  })
+
+  test("takes temperature from models.dev, and leaves it off without", () => {
+    expect(buildModel(anthropic, { id: "claude-x" }, { temperature: true }, "native").capabilities.temperature).toBe(true)
+    expect(buildModel(anthropic, { id: "claude-x" }, { temperature: false }, "native").capabilities.temperature).toBe(false)
+    expect(buildModel(anthropic, { id: "claude-x" }, { name: "Claude X" }, "native").capabilities.temperature).toBe(false)
   })
 
   test("turns effort options into variants", () => {
@@ -199,6 +207,35 @@ describe("buildModel", () => {
   test("declares the API by mode", () => {
     expect(buildModel(google, { id: "gemini-x" }, undefined, "native").api.npm).toBe(NPM.chat)
     expect(buildModel(google, { id: "gemini-x" }, undefined, "rest").api.npm).toBe(NPM.chat)
+  })
+})
+
+describe("metaFor", () => {
+  const base = { id: "gpt-x", name: "GPT X", limit: { context: 400000, output: 128000 }, reasoning: true }
+  const dated = { id: "gpt-x-2025-08-07", name: "GPT X (2025-08-07)" }
+
+  test("takes the exact id first", () => {
+    expect(metaFor({ "gpt-x": base, "gpt-x-2025-08-07": dated }, "gpt-x-2025-08-07")).toBe(dated)
+    expect(metaFor({ "gpt-x": base }, "gpt-x")).toBe(base)
+  })
+
+  test("falls back to the id without a -YYYY-MM-DD or -YYYYMMDD suffix, keeping the snapshot's own name", () => {
+    for (const id of ["gpt-x-2025-08-07", "gpt-x-20250807"]) {
+      const meta = metaFor({ "gpt-x": base }, id)
+      expect(meta.limit).toEqual(base.limit)
+      expect(meta.reasoning).toBe(true)
+      expect(meta.name).toBeUndefined()
+    }
+  })
+
+  test("finds nothing for other suffixes or unknown models", () => {
+    const metas = { "gpt-4": base, "grok-4.20": base }
+    expect(metaFor(metas, "gpt-4-0613")).toBeUndefined()
+    expect(metaFor(metas, "grok-4.20-0309-reasoning")).toBeUndefined()
+    expect(metaFor(metas, "gpt-y-2025-08-07")).toBeUndefined()
+    expect(metaFor({}, "gpt-x")).toBeUndefined()
+    expect(metaFor({}, "constructor")).toBeUndefined()
+    expect(metaFor({}, "constructor-2025-08-07")).toBeUndefined()
   })
 })
 
@@ -350,6 +387,19 @@ describe("listModels", () => {
     expect(models["xai/grok-9"]).toBeUndefined()
     expect(models["google/gemini-x"]).toBeDefined()
     expect(logs.some((m) => m.includes("xai"))).toBe(true)
+  })
+
+  test("a dated snapshot takes its base model's models.dev metadata", async () => {
+    const f = fakeFetch([
+      configs([row("anthropic")]),
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x-20250929", display_name: "Claude X 0929" }] })],
+      ["models.dev", json(CATALOG)],
+    ])
+    const m = (await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f }))["anthropic/claude-x-20250929"]
+    expect(m.name).toBe("Claude X 0929")
+    expect(m.limit).toEqual({ context: 200000, output: 64000 })
+    expect(m.capabilities.reasoning).toBe(true)
+    expect(m.cost.input).toBe(3)
   })
 
   test("xAI's grok-imagine models stay out though models.dev is down", async () => {

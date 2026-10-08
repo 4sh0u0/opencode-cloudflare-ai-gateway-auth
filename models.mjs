@@ -123,6 +123,18 @@ function variantsOf(meta) {
   return { low: {}, medium: {}, high: {} }
 }
 
+// A snapshot's date at the end of its id: -YYYY-MM-DD or -YYYYMMDD.
+const DATED = /-(?:\d{4}-\d{2}-\d{2}|\d{8})$/
+
+// metaFor is a model's models.dev metadata: its own, or else its base
+// model's for a dated snapshot, without the base's name so the snapshot
+// keeps a name of its own.
+export function metaFor(metas, id) {
+  if (Object.hasOwn(metas, id)) return metas[id]
+  const base = id.replace(DATED, "")
+  return base !== id && Object.hasOwn(metas, base) ? { ...metas[base], name: undefined } : undefined
+}
+
 // buildModel is the OpenCode Model magpie lists for one vendor model: each
 // field from models.dev first, then the vendor's live list, then defaults.
 export function buildModel(vendor, entry, meta, mode) {
@@ -139,7 +151,8 @@ export function buildModel(vendor, entry, meta, mode) {
     api: { id: key, url: PLACEHOLDER, npm: NPM[protocolFor(vendor, mode)] },
     limit,
     capabilities: {
-      temperature: meta?.temperature ?? true,
+      // magpie's own default; reasoning models refuse temperature
+      temperature: meta?.temperature ?? false,
       reasoning: meta?.reasoning ?? false,
       attachment: meta?.attachment ?? input.some((k) => k !== "text"),
       toolcall: meta?.tool_call ?? true,
@@ -255,7 +268,7 @@ async function collectModels({ account, directory, fetchImpl = fetch, log = () =
     const metas = catalog?.[vendor.catalog]?.models ?? {}
     const entries = lives[i] ?? Object.values(metas).map((m) => ({ id: m.id, name: m.name }))
     for (const entry of entries) {
-      const meta = metas[entry.id]
+      const meta = metaFor(metas, entry.id)
       if (!isTextModel(entry.id, meta, vendor)) continue
       const model = buildModel(vendor, entry, meta, account.mode)
       models[model.id] = model
