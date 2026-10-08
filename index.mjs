@@ -136,7 +136,7 @@ async function server(input = {}, options = {}) {
       id: PROVIDER,
       async models(provider, { auth } = {}) {
         if (auth?.type !== "api") return provider.models
-        const models = await listModels({ account: accountOf(auth), directory: input?.directory, log })
+        const models = await listModels({ account: accountOf(auth), directory: input?.directory, log, settings })
         if (Object.keys(models).length) return models
         const kept = { ...provider.models }
         kept[Symbol.for("magpie.fellBack")] = true

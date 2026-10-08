@@ -58,7 +58,7 @@
 | `index.mjs` | 唯一导出插件函数，组装 `config` / `auth` / `provider` 钩子；测试辅助挂在 `export const _internal` | 其余模块 |
 | `vendors.mjs` | 厂商映射表（纯数据 + 查询函数） | 无 |
 | `route.mjs` | `route(input, init, account, options)` → `{url, init}`，纯函数，负责 URL、请求头、请求体改写 | `vendors.mjs` |
-| `models.mjs` | 厂商发现、实时列表、models.dev 回退、元数据合并、过滤 | `vendors.mjs`、`cf.mjs` |
+| `models.mjs` | 厂商发现、实时列表、models.dev 回退、元数据合并、过滤 | `vendors.mjs`、`cf.mjs`、`errors.mjs`（读错误码）、`route.mjs`（只取常量） |
 | `cf.mjs` | Cloudflare API 小客户端：读 `provider_configs`，统一错误分类 | `route.mjs`（只取 API 常量） |
 | `errors.mjs` | 上游错误 → `X-Magpie-Sign-In` 判定；按协议格式构造本地错误响应 | 无 |
 | `test/*.test.mjs` | `bun test` 单元测试，fetch 全部模拟 | 被测模块 |
@@ -113,7 +113,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 
 | 选项 | 默认 | 作用 |
 |---|---|---|
-| `allowUnifiedBilling` | `false` | 为 `false` 时，每个请求带 `cf-aig-no-wholesale: true`，没有托管 key 时直接 400，绝不回落统一计费 |
+| `allowUnifiedBilling` | `false` | 为 `false` 时，每个请求（含第 6 节的模型列表请求）带 `cf-aig-no-wholesale: true`，没有托管 key 时直接 400，绝不回落统一计费 |
 
 ## 5. 请求路由
 
@@ -161,11 +161,11 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 1. **厂商发现**：`GET /accounts/{account}/ai-gateway/gateways/{gateway}/provider_configs`（分页 `page`/`per_page`），取 `alias` 与账号别名（空即 `default`）匹配的条目的 `provider_slug`，与映射表的 5 家取交集。
    - 401：token 无效 → 抛出带 `signIn: "expired"` 的错误；
    - 403（缺少 AI Gateway Read）或其他失败：日志提示，按 5 家全部处理。
-2. **实时列表**（各厂商并行，每个 8 秒超时；无论账号是模式 A 还是 B，列表都经原生入口获取，因为 REST API 没有列表端点）：`GET {gw}/{slug}{实时列表路径}`，头同 5.3（无请求体），解析：
+2. **实时列表**（各厂商并行，每个 8 秒超时；无论账号是模式 A 还是 B，列表都经原生入口获取，因为 REST API 没有列表端点）：`GET {gw}/{slug}{实时列表路径}`，头同 5.3（无请求体）：`cf-aig-authorization`、非默认别名的 `cf-aig-byok-alias`，以及 `allowUnifiedBilling` 不为 `true` 时的 `cf-aig-no-wholesale: true`（`listModels` 从 `index.mjs` 接收插件选项，缺省即带该头）。返回 400 且错误码（与 `errors.mjs` 同一解析）含 2044（该别名下没有这家厂商的托管 key，见 11.3）时，整家厂商不列出，也不走第 3 步的 models.dev 回退。成功时解析：
    - OpenAI / DeepSeek / xAI：`{data: [{id}]}`
    - Anthropic：`{data: [{id, display_name}]}`
    - Google：`{models: [{name: "models/<id>", displayName, inputTokenLimit, outputTokenLimit, supportedGenerationMethods}]}`，只保留含 `generateContent` 的
-3. **回退**：某厂商实时列表失败（含 V2 不成立的情况）→ 用 models.dev 中该厂商原生目录的全部模型。
+3. **回退**：某厂商实时列表失败（含 V2 不成立的情况，不含第 2 步的 2044）→ 用 models.dev 中该厂商原生目录的全部模型。
 4. **元数据合并**：按原生 ID 匹配 models.dev 原生目录，补 `name`、`limit`、`reasoning`/`variants`、`tool_call`、`modalities`、`cost`。每个字段的取值优先级：models.dev → 实时列表自带的信息（Anthropic 的 `display_name`、Google 的 `displayName` 与 token 上限）→ 默认值（上下文 128000、输出 16384、支持工具调用、不推理）。
 5. **过滤**：
    - 去掉 `status: "deprecated"`；

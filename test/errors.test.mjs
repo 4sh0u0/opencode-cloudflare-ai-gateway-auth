@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { annotate, localError, signInOf } from "../errors.mjs"
+import { NO_STORED_KEY, annotate, errorCodes, localError, signInOf } from "../errors.mjs"
 
 // Bodies as the live probe (design spec 11.3) saw them.
 const gatewayError = (status, code, message) =>
@@ -47,6 +47,18 @@ describe("signInOf", () => {
   test("other statuses say nothing", () => {
     for (const status of [200, 400, 429, 500]) expect(signInOf(status, gatewayRefusal, "native")).toBeNull()
     expect(signInOf(400, noStoredKey, "native")).toBeNull()
+  })
+})
+
+describe("errorCodes", () => {
+  test("reads the gateway's error[] and the API's errors[] codes", () => {
+    expect(errorCodes(noStoredKey)).toEqual([NO_STORED_KEY])
+    expect(errorCodes(apiRefusal)).toEqual([10000])
+  })
+
+  test("finds none in a vendor's own error or a non-JSON body", () => {
+    expect(errorCodes(openaiRefusal)).toEqual([])
+    expect(errorCodes("<html>")).toEqual([])
   })
 })
 

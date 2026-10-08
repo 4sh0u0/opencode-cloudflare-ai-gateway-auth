@@ -5,6 +5,9 @@
 // Read.
 export const GATEWAY_AUTH_CODES = new Set([2009])
 export const API_AUTH_CODES = new Set([10000])
+// The gateway's 400 when it holds no key for the vendor under the alias and
+// cf-aig-no-wholesale forbids Unified Billing (spec 11.3).
+export const NO_STORED_KEY = 2044
 
 const BODIES = {
   messages: (message) => ({ type: "error", error: { type: "invalid_request_error", message } }),
@@ -22,7 +25,7 @@ export function localError(protocol, status, message) {
 
 // errorCodes is every numeric code in a Cloudflare error body; a vendor's
 // own error (string codes, or none) has none.
-function errorCodes(text) {
+export function errorCodes(text) {
   let json
   try {
     json = JSON.parse(text)

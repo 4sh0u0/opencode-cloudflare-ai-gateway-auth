@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { byokSlugs, tokenRefused } from "./cf.mjs"
+import { NO_STORED_KEY, errorCodes } from "./errors.mjs"
 import { GATEWAY, PLACEHOLDER } from "./route.mjs"
 import { NPM, PROVIDER, VENDORS, protocolFor } from "./vendors.mjs"
 
@@ -136,25 +137,34 @@ export function buildModel(vendor, entry, meta, mode) {
 }
 
 // liveList asks the vendor for its models through the gateway, with the
-// stored key. null when the vendor's list doesn't pass through (probe V2).
-export async function liveList(vendor, account, fetchImpl = fetch) {
+// stored key and the headers an inference request carries. null when the
+// vendor's list doesn't pass through (probe V2). It throws an error with
+// noKey set when the gateway holds no key for the vendor under the alias.
+export async function liveList(vendor, account, { fetchImpl = fetch, settings = {} } = {}) {
   if (!vendor.list) return null
   const headers = { ...vendor.list.headers, "cf-aig-authorization": `Bearer ${account.token}`, accept: "application/json" }
   if (account.alias) headers["cf-aig-byok-alias"] = account.alias
+  if (settings.allowUnifiedBilling !== true) headers["cf-aig-no-wholesale"] = "true"
   const res = await fetchImpl(`${GATEWAY}/${account.account}/${account.gateway}/${vendor.slug}${vendor.list.path}`, {
     headers,
     signal: AbortSignal.timeout(8000),
   })
   if (!res.ok) {
-    await res.body?.cancel()
+    let codes = []
+    if (res.status === 400) codes = errorCodes(await res.text().catch(() => ""))
+    else await res.body?.cancel()
+    if (codes.includes(NO_STORED_KEY))
+      throw Object.assign(new Error(`The gateway holds no ${vendor.prefix} key for this alias`), { noKey: true })
     throw new Error(`${vendor.prefix}'s model list answered ${res.status}`)
   }
   return parseList(vendor.list.format, await res.json())
 }
 
 // listModels is the account's models: the vendors its gateway holds keys
-// for, each listed live or else from models.dev.
-export async function listModels({ account, directory, fetchImpl = fetch, log = () => {} }) {
+// for, each listed live or else from models.dev. settings are the plugin's
+// options ({allowUnifiedBilling}); without them lists never fall back to
+// Unified Billing.
+export async function listModels({ account, directory, fetchImpl = fetch, log = () => {}, settings = {} }) {
   let slugs = null
   try {
     slugs = await byokSlugs(account, { fetchImpl })
@@ -173,7 +183,12 @@ export async function listModels({ account, directory, fetchImpl = fetch, log = 
       return null
     }),
     ...vendors.map((v) =>
-      liveList(v, account, fetchImpl).catch((e) => {
+      liveList(v, account, { fetchImpl, settings }).catch((e) => {
+        // no key, nothing to call: an empty list leaves the vendor out
+        if (e.noKey) {
+          log("info", `${e.message}, so ${v.prefix} is left out`)
+          return []
+        }
         log("warn", `${e.message}; using models.dev for ${v.prefix}`)
         return null
       }),

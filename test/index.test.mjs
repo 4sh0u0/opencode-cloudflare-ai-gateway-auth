@@ -170,6 +170,27 @@ describe("server hooks", () => {
     }
   })
 
+  test("models passes allowUnifiedBilling on to the list requests", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cf-aig-"))
+    try {
+      const wholesale = async (options, auth) => {
+        const f = fakeFetch([
+          ["/provider_configs", json({ success: true, result: [{ provider_slug: "anthropic", alias: "default" }] })],
+          ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+          ["models.dev", json({})],
+        ])
+        globalThis.fetch = f
+        const hooks = await plugin.server({ directory: dir }, options)
+        await hooks.provider.models({ models: {} }, { auth })
+        return new Headers(f.calls.find((c) => c.url.includes("/anthropic/v1/models")).init.headers).get("cf-aig-no-wholesale")
+      }
+      expect(await wholesale({}, AUTH)).toBe("true")
+      expect(await wholesale({ allowUnifiedBilling: true }, { ...AUTH, key: "tok2" })).toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test("models returns the given list without an API sign-in", async () => {
     const hooks = await plugin.server({}, {})
     const given = { models: { a: {} } }

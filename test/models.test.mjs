@@ -290,6 +290,37 @@ describe("listModels", () => {
     expect(models["xai/grok-9"]).toBeDefined()
   })
 
+  test("list requests carry cf-aig-no-wholesale unless allowUnifiedBilling is on", async () => {
+    const routes = () => [
+      configs([row("anthropic")]),
+      ["/anthropic/v1/models", json({ data: [{ id: "claude-x" }] })],
+      ["models.dev", json(CATALOG)],
+    ]
+    const wholesale = (f) => new Headers(f.calls.find((c) => c.url.includes("/anthropic/v1/models")).init.headers).get("cf-aig-no-wholesale")
+    const safe = fakeFetch(routes())
+    await listModels({ account: ACCOUNT, directory: dir, fetchImpl: safe })
+    expect(wholesale(safe)).toBe("true")
+    const unified = fakeFetch(routes())
+    await listModels({ account: { ...ACCOUNT, token: "tok2" }, directory: dir, fetchImpl: unified, settings: { allowUnifiedBilling: true } })
+    expect(wholesale(unified)).toBeNull()
+  })
+
+  test("a vendor the gateway holds no key for (400, code 2044) is left out, not filled from models.dev", async () => {
+    const gatewayError = (code) =>
+      json({ success: false, result: [], messages: [], error: [{ code, message: "x" }], name: "AiGatewayError" }, 400)
+    const f = fakeFetch([
+      ["/provider_configs", json({ success: false, errors: [{ code: 10000 }] }, 403)],
+      ["/grok/v1/models", gatewayError(2044)],
+      ["/google-ai-studio/", gatewayError(2005)],
+      ["models.dev", json(CATALOG)],
+    ])
+    const logs = []
+    const models = await listModels({ account: ACCOUNT, directory: dir, fetchImpl: f, log: (level, message) => logs.push(message) })
+    expect(models["xai/grok-9"]).toBeUndefined()
+    expect(models["google/gemini-x"]).toBeDefined()
+    expect(logs.some((m) => m.includes("xai"))).toBe(true)
+  })
+
   test("xAI's grok-imagine models stay out though models.dev is down", async () => {
     const f = fakeFetch([
       configs([row("grok")]),
