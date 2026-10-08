@@ -1,6 +1,6 @@
 # opencode-cloudflare-ai-gateway-auth
 
-English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+English | [简体中文](https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/blob/main/README.zh-CN.md) | [日本語](https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/blob/main/README.ja.md)
 
 A [magpie](https://usemagpie.ai) provider plugin that sends your requests through
 [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) and pays for
@@ -43,7 +43,9 @@ magpie plugin login cloudflare-ai-gateway
 
 Each sign-in is one gateway, key alias and mode, named
 `<gateway>[/<alias>] · <account ID's first 8>[ · REST]`. Sign in again for another
-one; magpie fails over between them. Failover works between sign-ins of the same mode: native and REST sign-ins name models differently and REST serves only OpenAI and Anthropic, so don't pair them. Signing in again with the same gateway, alias
+one; magpie fails over between them. Failover works between sign-ins of the same
+mode: native and REST sign-ins name models differently and REST serves only OpenAI
+and Anthropic, so don't pair them. Signing in again with the same gateway, alias
 and mode replaces that sign-in, e.g. to rotate the token. The sign-in is kept in
 magpie's `plugin-auth.json` (mode 600).
 
@@ -105,7 +107,7 @@ magpie plugin options opencode-cloudflare-ai-gateway-auth '{"allowUnifiedBilling
 | You see | Meaning |
 |---|---|
 | The account asks to sign in again | Cloudflare refused the API token: check it hasn't expired and has AI Gateway Run and Read (REST mode: also Workers AI Read) |
-| 400 from a vendor (REST mode: 402 or 403) | The gateway has no key for it under your alias, or it isn't allowed |
+| 400 from a model (REST mode: 402 or 403) | The gateway holds no key for that vendor under your alias (native mode: code 2044). A 400 can also be the plugin refusing the request before sending it, e.g. an unknown vendor prefix, a model ID that isn't `<vendor>/<model>`, or Google, DeepSeek or xAI in REST mode; its message says which |
 | 404 or 500 from a model in REST mode | Cloudflare's model catalog has no model by that ID (e.g. a vendor's own `claude-sonnet-5-5` for the catalog's `claude-sonnet-5.5`): pick a listed model, or use native mode |
 | 401 from a vendor, account still signed in | The vendor refused the key stored in the gateway |
 | A model is missing | Its vendor has no key in the gateway, or it isn't a chat model; in REST mode, also any model that isn't in Cloudflare's catalog |

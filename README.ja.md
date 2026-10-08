@@ -1,6 +1,6 @@
 # opencode-cloudflare-ai-gateway-auth
 
-[English](README.md) | [简体中文](README.zh-CN.md) | 日本語
+[English](https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/blob/main/README.md) | [简体中文](https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/blob/main/README.zh-CN.md) | 日本語
 
 [magpie](https://usemagpie.ai) 用のプロバイダープラグインです。リクエストを [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) 経由で送信し、その料金は Cloudflare の Unified Billing ではなく、ゲートウェイに保存したプロバイダーキー（BYOK）で支払います。ゲートウェイから利用できるモデルの一覧も表示します。
 
@@ -70,7 +70,7 @@ magpie plugin options opencode-cloudflare-ai-gateway-auth '{"allowUnifiedBilling
 | 症状 | 意味 |
 |---|---|
 | アカウントが再サインインを求める | Cloudflare が API トークンを拒否しました。トークンの有効期限が切れていないか、AI Gateway Run と Read の権限（REST モードでは Workers AI Read も）があるかを確認してください |
-| ベンダーから 400（REST モードでは 402 または 403） | ゲートウェイのあなたのエイリアスにそのベンダーのキーがないか、そのベンダーが許可されていません |
+| モデルから 400（REST モードでは 402 または 403） | ゲートウェイのあなたのエイリアスに、そのベンダーのキーがありません（ネイティブモードでは code 2044）。400 は、プラグインがリクエストを送信する前に拒否した場合にも返ります。たとえば、未知のベンダープレフィックス、`<vendor>/<model>` 形式でないモデル ID、REST モードでの Google・DeepSeek・xAI です。どれに当たるかはメッセージに示されます |
 | REST モードでモデルから 404 または 500 | Cloudflare のモデルカタログにその ID のモデルがありません（例：カタログの `claude-sonnet-5.5` ではなく、ベンダー自身の `claude-sonnet-5-5` を指定した）。一覧にあるモデルを選ぶか、ネイティブモードを使ってください |
 | ベンダーから 401、ただしアカウントはサインインしたまま | ベンダーが、ゲートウェイに保存されたキーを拒否しました |
 | モデルが見つからない | そのベンダーのキーがゲートウェイにないか、チャットモデルではありません。REST モードでは、Cloudflare のカタログにないモデルも表示されません |

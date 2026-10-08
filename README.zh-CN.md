@@ -1,6 +1,6 @@
 # opencode-cloudflare-ai-gateway-auth
 
-[English](README.md) | 简体中文 | [日本語](README.ja.md)
+[English](https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/blob/main/README.md) | 简体中文 | [日本語](https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/blob/main/README.ja.md)
 
 一个 [magpie](https://usemagpie.ai) 供应商插件：把请求经由 [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) 发出，并用存放在网关中的厂商 key（BYOK）付费，而不是走 Cloudflare 的 Unified Billing（统一计费）。它还会列出网关能访问的模型。
 
@@ -70,7 +70,7 @@ magpie plugin options opencode-cloudflare-ai-gateway-auth '{"allowUnifiedBilling
 | 现象 | 含义 |
 |---|---|
 | 账户要求重新登录 | Cloudflare 拒绝了 API token：检查它是否已过期，是否具有 AI Gateway Run 和 Read 权限（REST 模式还需要 Workers AI Read） |
-| 厂商返回 400（REST 模式：402 或 403） | 网关在你的别名下没有该厂商的 key，或该厂商未被允许使用 |
+| 模型返回 400（REST 模式：402 或 403） | 网关在你的别名下没有该厂商的 key（原生模式：code 2044）。400 也可能是插件在发出请求前就拒绝了它，例如厂商前缀未知、模型 ID 不是 `<vendor>/<model>` 形式，或在 REST 模式下使用 Google、DeepSeek 或 xAI；错误消息会说明是哪一种 |
 | REST 模式下某个模型返回 404 或 500 | Cloudflare 的模型目录中没有这个 ID 的模型（例如用了厂商自己的 `claude-sonnet-5-5`，而目录中是 `claude-sonnet-5.5`）：请选择列表中的模型，或改用原生模式 |
 | 厂商返回 401，但账户仍处于登录状态 | 厂商拒绝了网关中存储的 key |
 | 缺少某个模型 | 它的厂商在网关中没有 key，或者它不是聊天模型；在 REST 模式下，不在 Cloudflare 目录中的模型也不会出现 |
