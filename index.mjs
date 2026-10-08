@@ -43,7 +43,7 @@ const PROMPTS = [
     message: "Upstream endpoint",
     options: [
       { label: "Native provider endpoints (recommended)", value: "native", hint: "gateway.ai.cloudflare.com, each vendor's own API" },
-      { label: "Cloudflare REST API", value: "rest", hint: "needs Workers AI Read · not verified live" },
+      { label: "Cloudflare REST API", value: "rest", hint: "needs Workers AI Read · OpenAI and Anthropic only" },
     ],
   },
   {

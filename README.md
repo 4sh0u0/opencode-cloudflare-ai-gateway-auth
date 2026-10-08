@@ -54,11 +54,17 @@ Models are named `<vendor>/<model>`; agents reach them as
 |---|---|---|---|
 | OpenAI | `openai/` | Responses | Responses |
 | Anthropic | `anthropic/` | Messages | Messages |
-| Google AI Studio | `google/` | Chat Completions | Chat Completions |
-| DeepSeek | `deepseek/` | Chat Completions | Chat Completions |
-| xAI | `xai/` | Chat Completions | Chat Completions |
+| Google AI Studio | `google/` | Chat Completions | — |
+| DeepSeek | `deepseek/` | Chat Completions | — |
+| xAI | `xai/` | Chat Completions | — |
 
-REST mode follows Cloudflare's documented model naming; it has not been verified live yet.
+REST mode reaches OpenAI and Anthropic only. Over REST, Cloudflare serves Google
+models through Vertex AI and DeepSeek through Fireworks, and doesn't use a stored xAI
+key, so the keys in your gateway don't serve these three. REST also takes only the IDs in
+Cloudflare's [model catalog](https://developers.cloudflare.com/ai/models/), which can
+differ from the vendor's own: Anthropic models with a minor version, such as
+`claude-sonnet-5-5`, are `claude-sonnet-5.5` there. A listed model whose ID isn't in
+the catalog fails in REST mode; use native mode for it.
 
 Only vendors your gateway holds a key for are listed. Each vendor's list comes from
 the vendor itself, through the gateway; when that fails, from
@@ -72,14 +78,17 @@ levels and prices.
   translated, so prompt caching, extended thinking and the Responses API reach the
   vendor as they are. Use this for Claude Code and Codex.
 - **REST** sends to `api.cloudflare.com/client/v4/accounts/<account>/ai/v1/…` with
-  `cf-aig-gateway-id`. It has no key aliases.
+  `cf-aig-gateway-id`. It has no key aliases, and reaches only OpenAI and Anthropic
+  models in Cloudflare's catalog (see above).
 
 ## Billing safety
 
 Every request carries `cf-aig-no-wholesale: true`, so a vendor without a stored key
-fails with 400 instead of falling back to Unified Billing. This is verified on the
-native endpoints; in REST mode it hasn't been verified live yet, so keep
-**Require provider credentials** on. To allow the fallback:
+fails instead of falling back to Unified Billing. On the native endpoints that is a
+400, verified live. In REST mode a gateway without the key answered 402 (code 7007)
+and billed nothing, but that check couldn't rule out the account simply having no
+Unified Billing credits, so keep **Require provider credentials** on: REST then
+answers 403 (code 2049). To allow the fallback:
 
 ```sh
 magpie plugin options opencode-cloudflare-ai-gateway-auth '{"allowUnifiedBilling": true}'
@@ -90,7 +99,8 @@ magpie plugin options opencode-cloudflare-ai-gateway-auth '{"allowUnifiedBilling
 | You see | Meaning |
 |---|---|
 | The account asks to sign in again | Cloudflare refused the API token: check it hasn't expired and has AI Gateway Run and Read (REST mode: also Workers AI Read) |
-| 400 from a vendor | The gateway has no key for it under your alias, or it isn't allowed |
+| 400 from a vendor (REST mode: 402 or 403) | The gateway has no key for it under your alias, or it isn't allowed |
+| 404 or 500 from a model in REST mode | Cloudflare's model catalog has no model by that ID; use native mode |
 | 401 from a vendor, account still signed in | The vendor refused the key stored in the gateway |
 | A model is missing | Its vendor has no key in the gateway, or it isn't a chat model |
 
