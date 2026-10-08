@@ -345,6 +345,20 @@ describe("loadCatalog", () => {
     expect(out.openai.models).toEqual({})
   })
 
+  test("a models.dev whose catalogs are all empty is a failure, and doesn't replace a good stale copy", async () => {
+    await loadCatalog({ directory: dir, fetchImpl: fakeFetch([["models.dev", json(CATALOG)]]), now: () => 0 })
+    const stale = CACHE_TTL * 2
+    const changed = fakeFetch([["models.dev", json({ providers: {} })]])
+    const out = await loadCatalog({ directory: dir, fetchImpl: changed, now: () => stale })
+    expect(out.xai.models["grok-9"]).toBeDefined()
+    const saved = JSON.parse(await readFile(join(dir, "cloudflare-ai-gateway-auth", "models-dev.json"), "utf8"))
+    expect(saved.fetchedAt).toBe(0)
+    resetModelCache()
+    const empty = await mkdtemp(join(tmpdir(), "cfaig-empty-"))
+    await expect(loadCatalog({ directory: empty, fetchImpl: changed, now: () => 0 })).rejects.toThrow("no models")
+    await rm(empty, { recursive: true, force: true })
+  })
+
   test("after a failure, doesn't ask models.dev again for CATALOG_RETRY", async () => {
     expect(CATALOG_RETRY).toBe(10 * 60 * 1000)
     const down = fakeFetch([["models.dev", new Response("", { status: 503 })]])

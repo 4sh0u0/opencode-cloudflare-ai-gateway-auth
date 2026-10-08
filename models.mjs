@@ -96,12 +96,16 @@ export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now
       const res = await fetchImpl(MODELS_DEV, { signal: AbortSignal.timeout(15000) })
       if (!res.ok) throw new Error(`models.dev answered ${res.status}`)
       const all = await res.json()
-      return Object.fromEntries(
+      const kept = Object.fromEntries(
         KEPT.map((c) => {
           const models = all?.[c]?.models
           return [c, { models: isObject(models) ? models : {} }]
         }),
       )
+      // as after a change of shape: zero models everywhere is a failure, so
+      // it never replaces a good stale copy
+      if (Object.values(kept).every((c) => Object.keys(c.models).length === 0)) throw new Error("models.dev lists no models")
+      return kept
     },
   })
 }
