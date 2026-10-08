@@ -105,7 +105,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 1. 再次校验并规范化 `account`（trim、转小写）、`gateway`（trim）、`mode`（缺省 `native`）、`alias`（trim，`default` 视为空）；不合法返回 `{type: "failed", error}`。
 2. 返回 `{type: "success", metadata: {account, gateway, mode, alias, email}}`，不返回 `key`（宿主用用户填写的 key 保存）。`email` 只用于账号显示名：magpie 按 `accountId` → `metadata.email` → `email` 取名，而 api 账号只保存 `metadata`。格式为 `<gateway>[/<alias>] · <account 前 8 位>[ · REST]`：别名非空时接在网关后，REST 模式在末尾加 ` · REST`。magpie 宿主的 `settle()` 登录时会替换同名账号（api 账号没有 uid），所以名称必须包含区分两次登录的全部字段（网关、别名、模式），否则同一网关的不同别名或不同模式会互相覆盖；同一（网关、账号、别名、模式）重新登录仍替换旧账号，正好用于轮换 token。
 3. token 有效性在第一次 `provider.models` 时验证（见第 6 节第 1 步）：CF API 返回 401 → 抛出带 `signIn: "expired"` 的错误，账号显示需要重新登录并附原因。
-4. 多网关 / 多账号 = 多次登录；magpie 自动对它们做故障切换。
+4. 多网关 / 多账号 = 多次登录；magpie 自动对它们做故障切换。故障切换只在同一模式的登录之间可靠：原生与 REST 的模型命名不同（原生 `anthropic/claude-sonnet-5-5`，REST 用目录 ID `anthropic/claude-sonnet-5.5`），且 REST 只服务 OpenAI 与 Anthropic，同一供应商下的账号按同一个模型 key 切换，混搭会得到 404 / 500 或本地 400，所以不要把原生登录与 REST 登录配成一对。
 
 ### 4.3 Token 权限
 
@@ -116,7 +116,7 @@ magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plu
 
 | 选项 | 默认 | 作用 |
 |---|---|---|
-| `allowUnifiedBilling` | `false` | 为 `false` 时，每个请求（含第 6 节的模型列表请求）带 `cf-aig-no-wholesale: true`，没有托管 key 时直接 400，绝不回落统一计费 |
+| `allowUnifiedBilling` | `false` | 为 `false` 时，每个请求（含第 6 节的模型列表请求）带 `cf-aig-no-wholesale: true`，没有托管 key 时不回落统一计费：原生入口直接 400，REST 答 402（code 7007），网关开启 Require provider credentials 时答 403（code 2049），见 11.6 |
 
 ## 5. 请求路由
 

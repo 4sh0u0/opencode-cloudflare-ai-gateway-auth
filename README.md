@@ -40,7 +40,7 @@ magpie plugin login cloudflare-ai-gateway
 
 Each sign-in is one gateway, key alias and mode, named
 `<gateway>[/<alias>] · <account ID's first 8>[ · REST]`. Sign in again for another
-one; magpie fails over between them. Signing in again with the same gateway, alias
+one; magpie fails over between them. Failover works between sign-ins of the same mode: native and REST sign-ins name models differently and REST serves only OpenAI and Anthropic, so don't pair them. Signing in again with the same gateway, alias
 and mode replaces that sign-in, e.g. to rotate the token. The sign-in is kept in
 magpie's `plugin-auth.json` (mode 600).
 
