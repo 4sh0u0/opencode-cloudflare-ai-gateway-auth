@@ -25,6 +25,14 @@
     "byok"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth.git"
+  },
+  "homepage": "https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth#readme",
+  "bugs": {
+    "url": "https://github.com/4sh0u0/opencode-cloudflare-ai-gateway-auth/issues"
+  },
   "engines": {
     "bun": ">=1.1.0"
   },
