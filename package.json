@@ -11,6 +11,8 @@
     "errors.mjs",
     "cf.mjs",
     "models.mjs",
+    "cache.mjs",
+    "cfcatalog.mjs",
     "README.md",
     "LICENSE"
   ],

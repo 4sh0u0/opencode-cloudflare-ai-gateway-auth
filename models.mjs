@@ -1,29 +1,24 @@
 import { createHash } from "node:crypto"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { cached, resetCacheFailures } from "./cache.mjs"
 import { byokSlugs, tokenRefused } from "./cf.mjs"
 import { NO_STORED_KEY, errorCodes } from "./errors.mjs"
 import { GATEWAY, PLACEHOLDER } from "./route.mjs"
 import { NPM, PROVIDER, VENDORS, protocolFor } from "./vendors.mjs"
 
+export { CACHE_TTL, CATALOG_RETRY } from "./cache.mjs"
 export const MODELS_DEV = "https://models.dev/api.json"
-export const CACHE_TTL = 6 * 60 * 60 * 1000
-// how long a failed models.dev refresh holds off the next one
-export const CATALOG_RETRY = 10 * 60 * 1000
 // how long an account's model list is kept in memory
 export const LIST_TTL = 10 * 60 * 1000
 export const DEFAULT_LIMIT = { context: 128000, output: 16384 }
 
 // Kept in this process only, never on disk: the lists by listKey, each
-// {promise, expires} (expires is 0 while the list is being made), and when
-// models.dev last failed, as {until, message}.
+// {promise, expires} (expires is 0 while the list is being made).
 const lists = new Map()
-let catalogFailure = null
 
-// resetModelCache forgets the kept lists and models.dev's last failure.
+// resetModelCache forgets the kept lists and the catalogs' last failures.
 export function resetModelCache() {
   lists.clear()
-  catalogFailure = null
+  resetCacheFailures()
 }
 
 // Words in the ids of models that don't chat, after magpie's own textModel.
@@ -85,44 +80,22 @@ const catalogOk = (data) => isObject(data) && VENDORS.every((v) => isObject(data
 // magpie's config folder; a stale copy serves while models.dev is down.
 // After a failed refresh it doesn't ask models.dev again for CATALOG_RETRY.
 export async function loadCatalog({ directory, fetchImpl = fetch, now = Date.now } = {}) {
-  const folder = directory ? join(directory, "cloudflare-ai-gateway-auth") : null
-  const file = folder ? join(folder, "models-dev.json") : null
-  let cached = null
-  if (file) {
-    try {
-      cached = JSON.parse(await readFile(file, "utf8"))
-    } catch {}
-    // a corrupt or foreign file is as good as none
-    if (!catalogOk(cached?.data)) cached = null
-  }
-  if (cached && now() - cached.fetchedAt < CACHE_TTL) return cached.data
-  if (catalogFailure && now() < catalogFailure.until) {
-    if (cached) return cached.data
-    throw new Error(catalogFailure.message)
-  }
-  try {
-    const res = await fetchImpl(MODELS_DEV, { signal: AbortSignal.timeout(15000) })
-    if (!res.ok) throw new Error(`models.dev answered ${res.status}`)
-    const all = await res.json()
-    const data = Object.fromEntries(
-      VENDORS.map((v) => {
-        const models = all?.[v.catalog]?.models
-        return [v.catalog, { models: isObject(models) ? models : {} }]
-      }),
-    )
-    if (file) {
-      try {
-        await mkdir(folder, { recursive: true })
-        await writeFile(file, JSON.stringify({ fetchedAt: now(), data }))
-      } catch {}
-    }
-    catalogFailure = null
-    return data
-  } catch (e) {
-    catalogFailure = { until: now() + CATALOG_RETRY, message: e.message }
-    if (cached) return cached.data
-    throw e
-  }
+  return cached("models-dev.json", {
+    directory,
+    now,
+    ok: catalogOk,
+    async refresh() {
+      const res = await fetchImpl(MODELS_DEV, { signal: AbortSignal.timeout(15000) })
+      if (!res.ok) throw new Error(`models.dev answered ${res.status}`)
+      const all = await res.json()
+      return Object.fromEntries(
+        VENDORS.map((v) => {
+          const models = all?.[v.catalog]?.models
+          return [v.catalog, { models: isObject(models) ? models : {} }]
+        }),
+      )
+    },
+  })
 }
 
 function flags(list) {
