@@ -66,8 +66,14 @@ function signIn(inputs) {
   const md = normalize(inputs)
   if (!accountOk(md.account)) return { type: "failed", error: ACCOUNT_HINT }
   if (!gatewayOk(md.gateway)) return { type: "failed", error: GATEWAY_HINT }
-  // magpie names an API-key account by metadata.email
-  return { type: "success", metadata: { ...md, email: `${md.gateway} · ${md.account.slice(0, 8)}` } }
+  return { type: "success", metadata: { ...md, email: labelOf(md) } }
+}
+
+// labelOf names the account. magpie names an API-key account by
+// metadata.email and replaces an account of the same name on sign-in, so it
+// holds everything that tells two sign-ins apart: gateway, alias and mode.
+function labelOf({ gateway, account, alias, mode }) {
+  return `${gateway}${alias ? `/${alias}` : ""} · ${account.slice(0, 8)}${mode === "rest" ? " · REST" : ""}`
 }
 
 const expired = (message) => Object.assign(new Error(message), { signIn: "expired" })

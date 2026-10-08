@@ -100,7 +100,7 @@ agent ──(任意协议)──> magpie 网关 ──(翻译成模型声明的�
 magpie 不把 key 字段的值传给 `api` 方法的 `authorize`（`internal/plugin/host.js` 的 `apiKey()` 只调用 `m.authorize(inputs)`，key 由宿主自己保存），所以登录时无法用 token 调 CF API。`authorize` 只做：
 
 1. 再次校验并规范化 `account`（trim、转小写）、`gateway`（trim）、`mode`（缺省 `native`）、`alias`（trim，`default` 视为空）；不合法返回 `{type: "failed", error}`。
-2. 返回 `{type: "success", metadata: {account, gateway, mode, alias, email: "<gateway> · <account 前 8 位>"}}`，不返回 `key`（宿主用用户填写的 key 保存）。`email` 只用于账号显示名：magpie 按 `accountId` → `metadata.email` → `email` 取名，而 api 账号只保存 `metadata`。
+2. 返回 `{type: "success", metadata: {account, gateway, mode, alias, email}}`，不返回 `key`（宿主用用户填写的 key 保存）。`email` 只用于账号显示名：magpie 按 `accountId` → `metadata.email` → `email` 取名，而 api 账号只保存 `metadata`。格式为 `<gateway>[/<alias>] · <account 前 8 位>[ · REST]`：别名非空时接在网关后，REST 模式在末尾加 ` · REST`。magpie 宿主的 `settle()` 登录时会替换同名账号（api 账号没有 uid），所以名称必须包含区分两次登录的全部字段（网关、别名、模式），否则同一网关的不同别名或不同模式会互相覆盖；同一（网关、账号、别名、模式）重新登录仍替换旧账号，正好用于轮换 token。
 3. token 有效性在第一次 `provider.models` 时验证（见第 6 节第 1 步）：CF API 返回 401 → 抛出带 `signIn: "expired"` 的错误，账号显示需要重新登录并附原因。
 4. 多网关 / 多账号 = 多次登录；magpie 自动对它们做故障切换。
 

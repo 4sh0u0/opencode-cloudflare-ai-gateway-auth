@@ -38,8 +38,11 @@ magpie plugin login cloudflare-ai-gateway
 | Upstream endpoint | **Native provider endpoints** (recommended) or **Cloudflare REST API** |
 | BYOK key alias | Native mode only; leave empty for the `default` key |
 
-Each sign-in is one gateway. Sign in again for another gateway; magpie fails over
-between them. The sign-in is kept in magpie's `plugin-auth.json` (mode 600).
+Each sign-in is one gateway, key alias and mode, named
+`<gateway>[/<alias>] · <account ID's first 8>[ · REST]`. Sign in again for another
+one; magpie fails over between them. Signing in again with the same gateway, alias
+and mode replaces that sign-in, e.g. to rotate the token. The sign-in is kept in
+magpie's `plugin-auth.json` (mode 600).
 
 ## Models
 

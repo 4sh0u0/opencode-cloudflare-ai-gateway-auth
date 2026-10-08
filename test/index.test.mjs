@@ -23,6 +23,20 @@ describe("signIn", () => {
     })
   })
 
+  // magpie's host replaces an account whose name (metadata.email) equals a
+  // new sign-in's, so the name tells every gateway, alias and mode apart
+  test("names each gateway, key alias and mode apart, and the same sign-in alike", () => {
+    const at = ACCT.slice(0, 8)
+    const email = (inputs) => _internal.signIn({ account: ACCT, gateway: "g", ...inputs }).metadata.email
+    expect(email({ mode: "native", alias: "" })).toBe(`g · ${at}`)
+    expect(email({ mode: "native", alias: "default" })).toBe(`g · ${at}`)
+    expect(email({ mode: "native", alias: "team-a" })).toBe(`g/team-a · ${at}`)
+    expect(email({ mode: "native", alias: "team-b" })).toBe(`g/team-b · ${at}`)
+    expect(email({ mode: "rest" })).toBe(`g · ${at} · REST`)
+    expect(email({ mode: "rest", alias: "team-a" })).toBe(`g · ${at} · REST`)
+    expect(email({ mode: "native", alias: "team-a" })).toBe(email({ mode: "native", alias: " team-a " }))
+  })
+
   test("keeps a real alias in native mode and drops it in REST mode", () => {
     expect(_internal.signIn({ account: ACCT, gateway: "g", mode: "native", alias: "team" }).metadata.alias).toBe("team")
     expect(_internal.signIn({ account: ACCT, gateway: "g", mode: "rest", alias: "team" }).metadata.alias).toBe("")

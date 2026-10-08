@@ -13,10 +13,14 @@ m() { env HOME="$sb" XDG_CONFIG_HOME="$sb/.config" XDG_CACHE_HOME="$sb/.cache" M
 mkdir -p "$sb/.config/magpie"
 # Seed the sign-in the way magpie keeps it (plugin-auth.json), so the token
 # is never typed or echoed. authorize() is covered by the unit tests.
+# The metadata comes from the plugin's own signIn, so the account's name is
+# the one a real sign-in gives.
 (cd "$root" && MODE="$mode" OUT="$sb/.config/magpie/plugin-auth.json" bun --env-file=.env.local -e '
+  const { _internal } = await import(`${process.cwd()}/index.mjs`)
   const { CF_API_TOKEN: key, CF_ACCOUNT_ID: account, CF_GATEWAY_ID: gateway, MODE: mode, OUT: out } = process.env
-  const metadata = { account, gateway, mode, alias: "", email: `${gateway} · ${account.slice(0, 8)}` }
-  await Bun.write(out, JSON.stringify({ "cloudflare-ai-gateway": { type: "api", key, metadata } }))
+  const signed = _internal.signIn({ account, gateway, mode })
+  if (signed.type !== "success") throw new Error(signed.error)
+  await Bun.write(out, JSON.stringify({ "cloudflare-ai-gateway": { type: "api", key, metadata: signed.metadata } }))
 ')
 chmod 600 "$sb/.config/magpie/plugin-auth.json"
 
