@@ -6,13 +6,20 @@ import { NPM, PROVIDER } from "./vendors.mjs"
 const ACCOUNT_RE = /^[0-9a-f]{32}$/
 // Cloudflare's own pattern for a gateway id
 const GATEWAY_RE = /^[a-z0-9_]+(?:-[a-z0-9_]+)*$/
+const ALIAS_RE = /^[A-Za-z0-9_-]{1,64}$/
 const ACCOUNT_HINT = "The account ID is 32 hexadecimal characters (Cloudflare dashboard → Account home)."
 const GATEWAY_HINT = "The gateway ID is the gateway's name in AI Gateway, such as my-gateway."
+const ALIAS_HINT = "The key alias is up to 64 letters, digits, - or _; leave it empty for default."
 
 const accountOk = (v) => ACCOUNT_RE.test(String(v ?? "").trim().toLowerCase())
 const gatewayOk = (v) => {
   const s = String(v ?? "").trim()
   return s.length <= 64 && GATEWAY_RE.test(s)
+}
+// empty is the default key; the alias goes out as a header
+const aliasOk = (v) => {
+  const s = String(v ?? "").trim()
+  return s === "" || ALIAS_RE.test(s)
 }
 
 const PROMPTS = [
@@ -45,6 +52,7 @@ const PROMPTS = [
     message: "BYOK key alias (empty for default)",
     placeholder: "default",
     when: { key: "mode", op: "eq", value: "native" },
+    validate: (v) => (aliasOk(v) ? undefined : ALIAS_HINT),
   },
 ]
 
@@ -66,6 +74,7 @@ function signIn(inputs) {
   const md = normalize(inputs)
   if (!accountOk(md.account)) return { type: "failed", error: ACCOUNT_HINT }
   if (!gatewayOk(md.gateway)) return { type: "failed", error: GATEWAY_HINT }
+  if (!aliasOk(md.alias)) return { type: "failed", error: ALIAS_HINT }
   return { type: "success", metadata: { ...md, email: labelOf(md) } }
 }
 
@@ -81,7 +90,8 @@ const expired = (message) => Object.assign(new Error(message), { signIn: "expire
 function accountOf(auth) {
   if (auth?.type !== "api" || !auth.key) throw expired("Sign in with a Cloudflare API token")
   const md = normalize(auth.metadata)
-  if (!accountOk(md.account) || !gatewayOk(md.gateway)) throw expired("This sign-in has no account or gateway; sign in again")
+  if (!accountOk(md.account) || !gatewayOk(md.gateway) || !aliasOk(md.alias))
+    throw expired("This sign-in has no valid account, gateway or key alias; sign in again")
   return { token: auth.key, ...md }
 }
 

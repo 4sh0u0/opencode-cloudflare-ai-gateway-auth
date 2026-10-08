@@ -93,7 +93,7 @@ agent ──(任意协议)──> magpie 网关 ──(翻译成模型声明的�
 | `account` | text | Cloudflare Account ID | `/^[0-9a-f]{32}$/` |
 | `gateway` | text | Gateway ID，示例 `my-gateway` | 不超过 64 字符，且符合 Cloudflare OpenAPI 中的网关 ID 规则 `/^[a-z0-9_]+(?:-[a-z0-9_]+)*$/` |
 | `mode` | select | `native`（原生入口，推荐）/ `rest`（REST API） | — |
-| `alias` | text | BYOK key 别名，留空即 `default`；仅 `mode == native` 时询问 | 可空 |
+| `alias` | text | BYOK key 别名，留空即 `default`；仅 `mode == native` 时询问 | 可空，否则须符合 `/^[A-Za-z0-9_-]{1,64}$/`（会作为 `cf-aig-byok-alias` 请求头发送）；`authorize` 与读取已保存的登录时同样校验 |
 
 ### 4.2 `authorize(inputs)`
 

@@ -50,6 +50,14 @@ describe("signIn", () => {
     expect(_internal.signIn({ account: ACCT, gateway: "g" }).metadata.mode).toBe("native")
   })
 
+  test("refuses a malformed key alias in native mode", () => {
+    for (const alias of ["bad alias", "team/a", "tëam", "a".repeat(65), "x\ny"])
+      expect([alias, _internal.signIn({ account: ACCT, gateway: "g", mode: "native", alias }).type]).toEqual([alias, "failed"])
+    expect(_internal.signIn({ account: ACCT, gateway: "g", mode: "native", alias: "Team_1-a" }).type).toBe("success")
+    expect(_internal.signIn({ account: ACCT, gateway: "g", mode: "native", alias: "a".repeat(64) }).type).toBe("success")
+    expect(_internal.signIn({ account: ACCT, gateway: "g", mode: "rest", alias: "bad alias" }).type).toBe("success")
+  })
+
   test("refuses a malformed account or gateway id", () => {
     expect(_internal.signIn({ account: "abc", gateway: "g" }).type).toBe("failed")
     expect(_internal.signIn({ account: ACCT, gateway: "My Gateway" }).type).toBe("failed")
@@ -70,11 +78,27 @@ describe("PROMPTS", () => {
     expect(gateway.validate("my-gateway")).toBeUndefined()
     expect(typeof gateway.validate("bad gateway")).toBe("string")
   })
+
+  test("validates the key alias as it is typed: empty, or up to 64 letters, digits, - and _", () => {
+    const alias = _internal.PROMPTS.find((p) => p.key === "alias")
+    for (const ok of ["", undefined, " ", "default", "team-a", "Team_1", "a".repeat(64)]) expect(alias.validate(ok)).toBeUndefined()
+    for (const bad of ["bad alias", "team/a", "tëam", "a".repeat(65)]) expect(typeof alias.validate(bad)).toBe("string")
+  })
 })
 
 describe("accountOf", () => {
   test("reads a saved sign-in", () => {
     expect(_internal.accountOf(AUTH)).toEqual({ token: "tok", account: ACCT, gateway: "my-gateway", mode: "native", alias: "" })
+  })
+
+  test("asks for a new sign-in when the saved alias is malformed", () => {
+    const bad = { ...AUTH, metadata: { ...AUTH.metadata, alias: "bad\nalias" } }
+    expect(() => _internal.accountOf(bad)).toThrow()
+    try {
+      _internal.accountOf(bad)
+    } catch (e) {
+      expect(e.signIn).toBe("expired")
+    }
   })
 
   test("asks for a new sign-in when the metadata is gone", () => {
