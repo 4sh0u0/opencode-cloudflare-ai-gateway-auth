@@ -74,7 +74,9 @@ levels and prices.
 ## Billing safety
 
 Every request carries `cf-aig-no-wholesale: true`, so a vendor without a stored key
-fails with 400 instead of falling back to Unified Billing. To allow the fallback:
+fails with 400 instead of falling back to Unified Billing. This is verified on the
+native endpoints; in REST mode it hasn't been verified live yet, so keep
+**Require provider credentials** on. To allow the fallback:
 
 ```sh
 magpie plugin options opencode-cloudflare-ai-gateway-auth '{"allowUnifiedBilling": true}'
@@ -84,7 +86,7 @@ magpie plugin options opencode-cloudflare-ai-gateway-auth '{"allowUnifiedBilling
 
 | You see | Meaning |
 |---|---|
-| The account asks to sign in again | Cloudflare refused the API token: check it hasn't expired and has AI Gateway Run and Read |
+| The account asks to sign in again | Cloudflare refused the API token: check it hasn't expired and has AI Gateway Run and Read (REST mode: also Workers AI Read) |
 | 400 from a vendor | The gateway has no key for it under your alias, or it isn't allowed |
 | 401 from a vendor, account still signed in | The vendor refused the key stored in the gateway |
 | A model is missing | Its vendor has no key in the gateway, or it isn't a chat model |
